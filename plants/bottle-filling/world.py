@@ -364,6 +364,8 @@ def runWorld():
             ball_center_y = (598 - nozzle_top_y + 6) * scale + 7 * scale / 2
             pygame.draw.circle(screen, ball_color, (int(ball_center_x), int(ball_center_y)), int(ball_radius))
 
+        # RECTANGLE OF "BASE_SHAPE"
+
         rect_color = (0, 0, 0)
 
         rect_x = (nozzle_center_x - 35) * scale
@@ -373,6 +375,8 @@ def runWorld():
         rect_height = 7 * scale
 
         pygame.draw.rect(screen, rect_color, pygame.Rect(rect_x, rect_y, rect_width, rect_height))
+
+        # RECTANGLE OF "BASE_SHAPE"
 
         rect_color2 = (0, 0, 0)
         rect_x2 = (nozzle_center_x - 30.2) * scale
