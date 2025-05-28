@@ -251,7 +251,6 @@ def runWorld():
         if len(wheel_angles) != len(wheels):
             wheel_angles = [0.0 for _ in wheels]
 
-
         if base_shape:
             space.remove(base_shape, base_shape.body)
         base_width = window_width / scale
@@ -326,6 +325,8 @@ def runWorld():
             border_top_left_radius=int(48 * scale),
             border_top_right_radius=int(48 * scale)
         )
+
+        # TRIANGLE OF THE NOZZLE
 
         triangle_color = colors["polygon"]
 
@@ -406,6 +407,8 @@ def runWorld():
 
         draw_polygon(screen, base_shape, scale, color=colors["polygon"])
 
+        # VERTICALE LINE OF "BUSE_SHAPE"
+
         line_color = (179, 179, 179)
         line_width = max(1, int(3 * scale))
         line_height = int(8 * scale)
@@ -481,11 +484,6 @@ def runWorld():
 
         quit_text = fontMedium.render("(press Esc to quit)", True, colors["text"])
         screen.blit(quit_text, (window_width - quit_text.get_width() - int(10 * scale), int(10 * scale)))
-
-        if dark_mode:
-            script_font = pygame.font.SysFont("Segoe Script", int(14 * scale))
-            version_text = script_font.render("        seclab_version", True, THECOLORS["lightgreen"])
-            screen.blit(version_text, (int(3 * scale), window_height - version_text.get_height() - int(3 * scale)))
 
         space.step(1 / FPS)
         pygame.display.flip()
