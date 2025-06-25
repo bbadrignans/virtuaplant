@@ -4,13 +4,13 @@
 # Imports
 #########################################
 # - Modbus protocol
-from pymodbus.client.sync   import ModbusTcpClient
-from pymodbus.server.async  import ModbusServerFactory
-from pymodbus.device        import ModbusDeviceIdentification
-from pymodbus.datastore     import ModbusSequentialDataBlock
-from pymodbus.datastore     import ModbusSlaveContext, ModbusServerContext
-from pymodbus.exceptions    import ConnectionException 
-from pymodbus.transaction   import ModbusSocketFramer
+from pymodbus.client.sync       import ModbusTcpClient
+from pymodbus.server.async_io   import ModbusServerFactory
+from pymodbus.device            import ModbusDeviceIdentification
+from pymodbus.datastore         import ModbusSequentialDataBlock
+from pymodbus.datastore         import ModbusSlaveContext, ModbusServerContext
+from pymodbus.exceptions        import ConnectionException 
+from pymodbus.transaction       import ModbusSocketFramer
 
 #########################################
 # Modbus code
