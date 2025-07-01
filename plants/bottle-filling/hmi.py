@@ -1,126 +1,94 @@
 #!/usr/bin/env python
 
-#########################################
-# Imports
-#########################################
-# - HMI Windows
-import  sys
-from gi.repository  import GLib, Gtk, GObject
+import sys
+import tkinter as tk
+from modbus import ClientModbus as Client
+from modbus import ConnectionException
+import os
+import time
+import json
+import argparse
 
-# - HMI communication
-from modbus         import ClientModbus as Client
-from modbus	    import ConnectionException 
+from world import PLC_RW_ADDR, PLC_RO_ADDR, PLC_TAG_CONTACT, PLC_TAG_LEVEL, PLC_TAG_MOTOR, PLC_TAG_NOZZLE, PLC_TAG_RUN
 
-# - World environement
-from world          import *
-
-#########################################
-# HMI code
-#########################################
-# "Constants"
+# Constants
 HMI_SCREEN_WIDTH = 20
-HMI_SLEEP        = 1
+HMI_SLEEP = 1
 
-class HMIWindow(Gtk.Window):
+class HMIWindow:
     def resetLabels(self):
-        self.bottlePositionValue.set_markup("<span weight='bold' foreground='gray33'>N/A</span>")
-        self.motorStatusValue.set_markup("<span weight='bold' foreground='gray33'>N/A</span>")
-        self.levelHitValue.set_markup("<span weight='bold' foreground='gray33'>N/A</span>")
-        self.processStatusValue.set_markup("<span weight='bold' foreground='gray33'>N/A</span>")
-        self.nozzleStatusValue.set_markup("<span weight='bold' foreground='gray33'>N/A</span>")
-        self.connectionStatusValue.set_markup("<span weight='bold' foreground='red'>OFFLINE</span>")
+        self.bottlePositionValue.config(text="N/A", fg="gray33")
+        self.motorStatusValue.config(text="N/A", fg="gray33")
+        self.levelHitValue.config(text="N/A", fg="gray33")
+        self.processStatusValue.config(text="N/A", fg="gray33")
+        self.nozzleStatusValue.config(text="N/A", fg="gray33")
+        self.connectionStatusValue.config(text="OFFLINE", fg="red")
 
-    def __init__(self, address, port):
-        Gtk.Window.__init__(self, title="Bottle-filling factory - HMI - VirtuaPlant")
+    def __init__(self, address, base_port):
+        ports = {
+            "plc": base_port
+        }
+        if os.path.exists("ports.json"):
+            with open("ports.json", "r") as f:
+                saved_ports = json.load(f)
+            if saved_ports.get("plc") == base_port:
+                ports = saved_ports
 
-        self.set_border_width(HMI_SCREEN_WIDTH)
-        
-        self.client = Client(address, port=port)
+        self.client = Client(address, port=ports["plc"])
+        self.client.connect()
 
-        elementIndex = 0
+        self.window = tk.Tk()
+        self.window.title("Bottle-filling factory - HMI - VirtuaPlant")
 
-        # Grid
-        grid = Gtk.Grid()
-        grid.set_row_spacing(15)
-        grid.set_column_spacing(10)
-        self.add(grid)
+        self.frame = tk.Frame(self.window)
+        self.frame.pack(padx=HMI_SCREEN_WIDTH, pady=HMI_SCREEN_WIDTH)
 
-        # Main title label
-        label = Gtk.Label()
-        label.set_markup("<span weight='bold' size='x-large'>Bottle-filling process status</span>")
-        grid.attach(label, 0, elementIndex, 2, 1)
-        elementIndex += 1
+        self.create_widgets()
+        self.window.after(HMI_SLEEP * 1000, self.update_status)
 
-        # Bottle in position label
-        bottlePositionLabel = Gtk.Label("Bottle in position")
-        bottlePositionValue = Gtk.Label()
-        grid.attach(bottlePositionLabel, 0, elementIndex, 1, 1)
-        grid.attach(bottlePositionValue, 1, elementIndex, 1, 1)
-        elementIndex += 1
+    def create_widgets(self):
+        label = tk.Label(self.frame, text="Bottle-filling process status", font=("Helvetica", 16, "bold"))
+        label.grid(row=0, column=0, columnspan=2)
 
-        # Nozzle status label
-        nozzleStatusLabel = Gtk.Label("Nozzle Status")
-        nozzleStatusValue = Gtk.Label()
-        grid.attach(nozzleStatusLabel, 0, elementIndex, 1, 1)
-        grid.attach(nozzleStatusValue, 1, elementIndex, 1, 1)
-        elementIndex += 1
+        self.bottlePositionLabel = tk.Label(self.frame, text="Bottle in position")
+        self.bottlePositionValue = tk.Label(self.frame, text="N/A", fg="gray33")
+        self.bottlePositionLabel.grid(row=1, column=0)
+        self.bottlePositionValue.grid(row=1, column=1)
 
-        # Motor status label
-        motorStatusLabel = Gtk.Label("Motor Status")
-        motorStatusValue = Gtk.Label()
-        grid.attach(motorStatusLabel, 0, elementIndex, 1, 1)
-        grid.attach(motorStatusValue, 1, elementIndex, 1, 1)
-        elementIndex += 1
+        self.nozzleStatusLabel = tk.Label(self.frame, text="Nozzle Status")
+        self.nozzleStatusValue = tk.Label(self.frame, text="N/A", fg="gray33")
+        self.nozzleStatusLabel.grid(row=2, column=0)
+        self.nozzleStatusValue.grid(row=2, column=1)
 
-        # Level hit label
-        levelHitLabel = Gtk.Label("Level Hit")
-        levelHitValue = Gtk.Label()
-        grid.attach(levelHitLabel, 0, elementIndex, 1, 1)
-        grid.attach(levelHitValue, 1, elementIndex, 1, 1)
-        elementIndex += 1
+        self.motorStatusLabel = tk.Label(self.frame, text="Motor Status")
+        self.motorStatusValue = tk.Label(self.frame, text="N/A", fg="gray33")
+        self.motorStatusLabel.grid(row=3, column=0)
+        self.motorStatusValue.grid(row=3, column=1)
 
-        # Process status
-        processStatusLabel = Gtk.Label("Process Status")
-        processStatusValue = Gtk.Label()
-        grid.attach(processStatusLabel, 0, elementIndex, 1, 1)
-        grid.attach(processStatusValue, 1, elementIndex, 1, 1)
-        elementIndex += 1
+        self.levelHitLabel = tk.Label(self.frame, text="Level Hit")
+        self.levelHitValue = tk.Label(self.frame, text="N/A", fg="gray33")
+        self.levelHitLabel.grid(row=4, column=0)
+        self.levelHitValue.grid(row=4, column=1)
 
-        # Connection status
-        connectionStatusLabel = Gtk.Label("Connection Status")
-        connectionStatusValue = Gtk.Label()
-        grid.attach(connectionStatusLabel, 0, elementIndex, 1, 1)
-        grid.attach(connectionStatusValue, 1, elementIndex, 1, 1)
-        elementIndex += 1
+        self.processStatusLabel = tk.Label(self.frame, text="Process Status")
+        self.processStatusValue = tk.Label(self.frame, text="N/A", fg="gray33")
+        self.processStatusLabel.grid(row=5, column=0)
+        self.processStatusValue.grid(row=5, column=1)
 
-        # Run and Stop buttons
-        runButton   = Gtk.Button("Run")
-        stopButton  = Gtk.Button("Stop")
+        self.connectionStatusLabel = tk.Label(self.frame, text="Connection Status")
+        self.connectionStatusValue = tk.Label(self.frame, text="OFFLINE", fg="red")
+        self.connectionStatusLabel.grid(row=6, column=0)
+        self.connectionStatusValue.grid(row=6, column=1)
 
-        runButton.connect("clicked", self.setProcess, 1)
-        stopButton.connect("clicked", self.setProcess, 0)
+        self.runButton = tk.Button(self.frame, text="Run", command=lambda: self.setProcess(1))
+        self.stopButton = tk.Button(self.frame, text="Stop", command=lambda: self.setProcess(0))
+        self.runButton.grid(row=7, column=0)
+        self.stopButton.grid(row=7, column=1)
 
-        grid.attach(runButton, 0, elementIndex, 1, 1)
-        grid.attach(stopButton, 1, elementIndex, 1, 1)
-        elementIndex += 1
+        self.virtuaPlantLabel = tk.Label(self.frame, text="VirtuaPlant - HMI", font=("Helvetica", 8, "italic"))
+        self.virtuaPlantLabel.grid(row=8, column=0, columnspan=2)
 
-        # VirtuaPlant branding
-        virtuaPlant = Gtk.Label()
-        virtuaPlant.set_markup("<span size='small'>VirtuaPlant - HMI</span>")
-        grid.attach(virtuaPlant, 0, elementIndex, 2, 1)
-
-        # Attach Value Labels
-        self.processStatusValue     = processStatusValue
-        self.connectionStatusValue  = connectionStatusValue
-        self.levelHitValue          = levelHitValue
-        self.motorStatusValue       = motorStatusValue
-        self.bottlePositionValue    = bottlePositionValue
-        self.nozzleStatusValue      = nozzleStatusValue
-
-        self.resetLabels()
-        GObject.timeout_add_seconds(HMI_SLEEP, self.update_status)
-
-    def setProcess(self, widget, data=None):
+    def setProcess(self, data=None):
         try:
             self.client.write(PLC_RW_ADDR + PLC_TAG_RUN, data)
         except:
@@ -130,53 +98,53 @@ class HMIWindow(Gtk.Window):
         try:
             regs = self.client.readln(PLC_RO_ADDR, 17)
 
-            if regs[PLC_TAG_CONTACT] == 1:
-                self.bottlePositionValue.set_markup("<span weight='bold' foreground='green'>YES</span>")
-            else:
-                self.bottlePositionValue.set_markup("<span weight='bold' foreground='red'>NO</span>")
+            self.bottlePositionValue.config(
+                text="YES" if regs[PLC_TAG_CONTACT] == 1 else "NO",
+                fg="green" if regs[PLC_TAG_CONTACT] == 1 else "red"
+            )
 
-            if regs[PLC_TAG_LEVEL] == 1:
-                self.levelHitValue.set_markup("<span weight='bold' foreground='green'>YES</span>")
-            else:
-                self.levelHitValue.set_markup("<span weight='bold' foreground='red'>NO</span>")
+            self.levelHitValue.config(
+                text="YES" if regs[PLC_TAG_LEVEL] == 1 else "NO",
+                fg="green" if regs[PLC_TAG_LEVEL] == 1 else "red"
+            )
 
-            if regs[PLC_TAG_MOTOR] == 1:
-                self.motorStatusValue.set_markup("<span weight='bold' foreground='green'>ON</span>")
-            else:
-                self.motorStatusValue.set_markup("<span weight='bold' foreground='red'>OFF</span>")
+            self.motorStatusValue.config(
+                text="ON" if regs[PLC_TAG_MOTOR] == 1 else "OFF",
+                fg="green" if regs[PLC_TAG_MOTOR] == 1 else "red"
+            )
 
-            if regs[PLC_TAG_NOZZLE] == 1:
-                    self.nozzleStatusValue.set_markup("<span weight='bold' foreground='green'>OPEN</span>")
-            else:
-                self.nozzleStatusValue.set_markup("<span weight='bold' foreground='red'>CLOSED</span>")
+            self.nozzleStatusValue.config(
+                text="OPEN" if regs[PLC_TAG_NOZZLE] == 1 else "CLOSED",
+                fg="green" if regs[PLC_TAG_NOZZLE] == 1 else "red"
+            )
 
-            regs = self.client.readln(PLC_RW_ADDR, 17)
+            regs_rw = self.client.readln(PLC_RW_ADDR, 17)
 
-            if regs[PLC_TAG_RUN] == 1:
-                self.processStatusValue.set_markup("<span weight='bold' foreground='green'>RUNNING</span>")
-            else:
-                self.processStatusValue.set_markup("<span weight='bold' foreground='red'>STOPPED</span>")
+            self.processStatusValue.config(
+                text="RUNNING" if regs_rw[PLC_TAG_RUN] == 1 else "STOPPED",
+                fg="green" if regs_rw[PLC_TAG_RUN] == 1 else "red"
+            )
 
-            self.connectionStatusValue.set_markup("<span weight='bold' foreground='green'>ONLINE</span>")
+            self.connectionStatusValue.config(text="ONLINE", fg="green")
 
         except ConnectionException:
             if not self.client.connect():
                 self.resetLabels()
         except:
             raise
-
         finally:
-            return True
+            self.window.after(HMI_SLEEP * 1000, self.update_status)
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="Lancer le HMI pour VirtuaPlant.")
+    parser.add_argument("--ip", required=True, help="Adresse IP du serveur")
+    parser.add_argument("--port", type=int, required=True, help="Port du serveur PLC")
+    return parser.parse_args()
 
 def main():
-    GObject.threads_init()
-    win = HMIWindow(PLC_SERVER_IP, PLC_SERVER_PORT)
-
-    win.connect("delete-event", Gtk.main_quit)
-    win.connect("destroy", Gtk.main_quit)
-
-    win.show_all()
-    Gtk.main()
+    args = parse_arguments()
+    hmi = HMIWindow(args.ip, args.port)
+    hmi.window.mainloop()
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -1,45 +1,35 @@
 #!/usr/bin/env python
 
-#########################################
-# Imports
-#########################################
-# - Modbus protocol
-from pymodbus.client.sync       import ModbusTcpClient
-from pymodbus.server.async_io   import ModbusServerFactory
-from pymodbus.device            import ModbusDeviceIdentification
-from pymodbus.datastore         import ModbusSequentialDataBlock
-from pymodbus.datastore         import ModbusSlaveContext, ModbusServerContext
-from pymodbus.exceptions        import ConnectionException 
-from pymodbus.transaction       import ModbusSocketFramer
+import sys
+from pymodbus.client.sync import ModbusTcpClient
+from pymodbus.server.sync import StartTcpServer
+from pymodbus.device import ModbusDeviceIdentification
+from pymodbus.datastore import ModbusSequentialDataBlock, ModbusSlaveContext, ModbusServerContext
+from pymodbus.exceptions import ConnectionException
+from pymodbus.transaction import ModbusSocketFramer
 
-#########################################
-# Modbus code
-#########################################
-# Global Variables
-MODBUS_PORT = 502
+MODBUS_PORT = 2052
 
-class ClientModbus(ModbusTcpClient):
-    def __init__(self, address, port = MODBUS_PORT):
-        ModbusTcpClient.__init__(self, address, port)
+class ClientModbus(ModbusTcpClient):    
+    def __init__(self, address, port=MODBUS_PORT):
+        super().__init__(address, port)
 
     def read(self, addr):
-        regs = self.readln(addr,1)
-
-        return regs[0]
+        try:
+            regs = self.readln(addr, 1)
+            return regs[0]
+        except ConnectionException:
+            self.connect()
+            regs = self.readln(addr, 1)
+            return regs[0]
 
     def readln(self, addr, size):
-        rr = self.read_holding_registers(addr,size)
-        regs = []
-
-        if not rr or not rr.registers:
+        rr = self.read_holding_registers(addr, size)
+        if not rr or not hasattr(rr, 'registers'):
             raise ConnectionException
-
-        regs = rr.registers
-
-        if not regs or len(regs) < size:
+        if len(rr.registers) < size:
             raise ConnectionException
-
-        return regs
+        return rr.registers
 
     def write(self, addr, data):
         self.write_register(addr, data)
@@ -47,34 +37,35 @@ class ClientModbus(ModbusTcpClient):
     def writeln(self, addr, data, size):
         self.write_registers(addr, data)
 
-class ServerModbus(ModbusServerFactory):
-    def __init__(self, address, port = MODBUS_PORT):
-        block = ModbusSequentialDataBlock(0x00, [0]*0x3ff)
-        store = ModbusSlaveContext(di=block, co=block, hr=block, ir=block)
-        
+class ServerModbus:
+    def __init__(self, address="localhost", port=MODBUS_PORT):
+        self.address = address
+        self.port = port
+        self.block = ModbusSequentialDataBlock(0x00, [0]*0x3ff)
+        store = ModbusSlaveContext(di=self.block, co=self.block, hr=self.block, ir=self.block)
         self.context = ModbusServerContext(slaves=store, single=True)
-        
-        identity = ModbusDeviceIdentification()
-        identity.VendorName         = 'MockPLCs'
-        identity.ProductCode        = 'MP'
-        identity.VendorUrl          = 'http://github.com/bashwork/pymodbus/'
-        identity.ProductName        = 'MockPLC 3000'
-        identity.ModelName          = 'MockPLC Ultimate'
-        identity.MajorMinorRevision = '1.0'
+        self.identity = ModbusDeviceIdentification()
+        self.identity.VendorName = 'MockPLCs'
+        self.identity.ProductCode = 'MP'
+        self.identity.VendorUrl = 'http://github.com/bashwork/pyddmodbus/'
+        self.identity.ProductName = 'MockPLC 3000'
+        self.identity.ModelName = 'MockPLC Ultimate'
+        self.identity.MajorMinorRevision = '1.0'
 
-        ModbusServerFactory.__init__(self, self.context, ModbusSocketFramer, identity)
-    
-    def write(self, addr, data):
-        self.context[0x0].setValues(3, addr, [data])
-    
-    def writeln(self, addr, data, size):
-        self.context[0x0].setValues(3, addr, [data])
-    
     def read(self, addr):
-        return self.context[0x0].getValues(3, addr, count=1)[0]
+        return self.context[0].getValues(3, addr, count=1)[0]
 
-    def readln(self, addr, size):
-        return self.context[0x0].getValues(3, addr, count=1)[0]
+    def write(self, addr, value):
+        self.context[0].setValues(3, addr, [value])
 
-if __name__ == '__main__':
+    def start(self):
+        StartTcpServer(context=self.context, identity=self.identity, address=(self.address, self.port))
+
+def main():
+    print("Modbus TCP prêt.")
+    server = ServerModbus()
+    server.start()
+    return 0
+
+if __name__ == "__main__":
     sys.exit(main())

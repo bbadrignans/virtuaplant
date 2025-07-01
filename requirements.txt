@@ -1,10 +1,11 @@
 argparse==1.4.0
 pyasn1==0.1.7
 pycrypto==2.6.1
-pymodbus==3.1.2
+pymodbus==2.5.3
 pymunk==6.11.1
 pyserial==3.5
 logging==0.4.9.6
 redis==6.2.0
 sqlalchemy==2.0.41
 pyserial-asyncio==0.6
+PyGObject==3.50.0
