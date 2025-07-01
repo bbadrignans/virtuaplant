@@ -24,7 +24,6 @@ PLC_TAG_LEVEL = 0x1
 PLC_TAG_CONTACT = 0x2
 PLC_TAG_MOTOR = 0x3
 PLC_TAG_NOZZLE = 0x4
-PLC_TAG_NEVER_STOP = 0x5
 
 # Globals
 plc = {}
@@ -58,7 +57,7 @@ def add_ball(space):
 
 def draw_ball(screen, ball, scale=1.0, color=THECOLORS['blue']):
     p = to_pygame(ball.body.position, scale)
-    pygame.draw.circle(screen, color, p, max(1, int(ball.radius * scale)), 2)
+    pygame.draw.circle(screen, color, p, max(1, int(ball.radius * scale)), 0)
 
 def add_bottle(space):
     mass = 10
@@ -174,57 +173,88 @@ def runWorld():
     nozzle_start_time = None
     sensor_triggered = False
 
+    MODBUS_EVENT = pygame.event.custom_type() 
+    RESIZE_EVENT = pygame.event.custom_type() 
+
+    pygame.time.set_timer(pygame.event.Event(MODBUS_EVENT), 1, 1)
+    pygame.time.set_timer(pygame.event.Event(RESIZE_EVENT), 1, 1)
+
     while running:
+
         clock.tick(FPS)
-        window_width, window_height = screen.get_size()
-        scale_x = window_width / WORLD_SCREEN_WIDTH
-        scale_y = window_height / WORLD_SCREEN_HEIGHT
-        scale = min(scale_x, scale_y)
+        screen.fill(THECOLORS["white"])
+
         for event in pygame.event.get():
             if event.type == QUIT or (event.type == KEYDOWN and event.key == K_ESCAPE):
                 running = False
 
-        fontBig = pygame.font.SysFont(None, int(40 * scale))
-        fontMedium = pygame.font.SysFont(None, int(26 * scale))
+            #Update Modbus registers
+            if event.type == MODBUS_EVENT:
+                # Manage plc
+                # Read remote/local variables
+                tag_level = plc['level'].read(0)
+                tag_contact = plc['contact'].read(0)
+                tag_run = plc['server'].read(PLC_RW_ADDR + PLC_TAG_RUN)
 
-        screen.fill(THECOLORS["white"])
+                # Manage PLC programm
+                # Motor Logic
+                tag_motor = 1 if tag_run == 1 and (tag_contact == 0 or tag_level == 1) else 0
+                tag_nozzle = 1 if tag_run == 1 and tag_contact == 1 and tag_level == 0 else 0
 
-        sensor_x = WORLD_SCREEN_WIDTH // 3.58
-        sensor_y = WORLD_SCREEN_HEIGHT // 1.68
-        sensor_radius = 1.5
-        sensor_radius_scaled = int(sensor_radius * scale)
+                plc['motor'].write(0, tag_motor)
+                plc['nozzle'].write(0, tag_nozzle)
 
-        tag_level = plc['level'].read(0)
-        tag_contact = plc['contact'].read(0)
-        tag_run = plc['server'].read(PLC_RW_ADDR + PLC_TAG_RUN)
-        tag_never_stop = plc['server'].read(PLC_RW_ADDR + PLC_TAG_NEVER_STOP)
-        never_stop = plc['server'].read(PLC_RW_ADDR + PLC_TAG_NEVER_STOP)
+                plc['server'].write(PLC_RO_ADDR + PLC_TAG_LEVEL, tag_level)
+                plc['server'].write(PLC_RO_ADDR + PLC_TAG_CONTACT, tag_contact)
+                plc['server'].write(PLC_RO_ADDR + PLC_TAG_MOTOR, tag_motor)
+                plc['server'].write(PLC_RO_ADDR + PLC_TAG_NOZZLE, tag_nozzle)
 
-        tag_motor = 1 if tag_run == 1 and (tag_contact == 0 or tag_level == 1) else 0
-        tag_nozzle = 1 if tag_run == 1 and tag_contact == 1 and tag_level == 0 else 0
+                nozzle_state = nozzle['server'].read(0)
+                motor_state = motor['server'].read(0)
 
-        plc['motor'].write(0, tag_motor)
-        plc['nozzle'].write(0, tag_nozzle)
+                if nozzle_start_time and (time.time() - nozzle_start_time >= 1.5):
+                    plc['nozzle'].write(0, 0)
+                    nozzle_start_time = None
+                    sensor_triggered = False
 
-        plc['server'].write(PLC_RO_ADDR + PLC_TAG_LEVEL, tag_level)
-        plc['server'].write(PLC_RO_ADDR + PLC_TAG_CONTACT, tag_contact)
-        plc['server'].write(PLC_RO_ADDR + PLC_TAG_MOTOR, tag_motor)
-        plc['server'].write(PLC_RO_ADDR + PLC_TAG_NOZZLE, tag_nozzle)
+                current_time = time.time()
 
-        if nozzle['server'].read(0) == 1 or tag_never_stop == 2:
+                if is_sensor_touching_bottle(sensor_x, sensor_y, sensor_radius, bottles) and not sensor_triggered:
+                    if current_time - last_sensor_trigger_time >= 2.3:
+                        sensor_triggered = True
+                        plc['contact'].write(0, 1)
+                        plc['nozzle'].write(0, 1)
+                        nozzle_start_time = current_time
+                        threading.Timer(1.8, lambda: plc['contact'].write(0, 0)).start()
+                        last_sensor_trigger_time = current_time
+
+                pygame.time.set_timer(pygame.event.Event(MODBUS_EVENT), 100, 1)
+
+            #Update screen size
+            if event.type == RESIZE_EVENT:
+                window_width, window_height = screen.get_size()
+                scale_x = window_width / WORLD_SCREEN_WIDTH
+                scale_y = window_height / WORLD_SCREEN_HEIGHT
+                scale = min(scale_x, scale_y)
+
+                fontBig = pygame.font.SysFont(None, int(40 * scale))
+                fontMedium = pygame.font.SysFont(None, int(26 * scale))
+
+                sensor_x = WORLD_SCREEN_WIDTH // 3.58
+                sensor_y = WORLD_SCREEN_HEIGHT // 1.68
+                sensor_radius = 1.5
+                sensor_radius_scaled = int(sensor_radius * scale)
+
+                pygame.time.set_timer(pygame.event.Event(RESIZE_EVENT), 500, 1)
+
+        if nozzle_state == 1:
             if bottles:
                 balls.append((add_ball(space), bottles[-1][0].body))
             else:
                 balls.append((add_ball(space), None))
             last_sensor_trigger_time = time.time()
 
-
-        if nozzle_start_time and (time.time() - nozzle_start_time >= 1.5):
-            plc['nozzle'].write(0, 0)
-            nozzle_start_time = None
-            sensor_triggered = False
-
-        if motor['server'].read(0) == 1:
+        if motor_state == 1:
             for bottle in bottles:
                 body = bottle[0].body
                 body.position = (body.position.x + 0.25, body.position.y)
@@ -242,7 +272,6 @@ def runWorld():
                 balls.remove(ball_data)
             else:
                 draw_ball(screen, ball, scale)
-
 
         for bottle in bottles[:]:
             pos_x = bottle[0].body.position.x
@@ -271,20 +300,6 @@ def runWorld():
 
         draw_polygon(screen, base_shape, scale)
 
-        current_time = time.time()
-
-        if not never_stop:
-            if is_sensor_touching_bottle(sensor_x, sensor_y, sensor_radius, bottles) and not sensor_triggered:
-                if current_time - last_sensor_trigger_time >= 2.3:
-                    sensor_triggered = True
-                    plc['contact'].write(0, 1)
-                    plc['nozzle'].write(0, 1)
-                    nozzle_start_time = current_time
-                    threading.Timer(1.8, lambda: plc['contact'].write(0, 0)).start()
-                    last_sensor_trigger_time = current_time
-        else:
-            plc['contact'].write(0, 0)
-
         if not sensor_triggered:
             screen_x = int(sensor_x * scale)
             screen_y = int(sensor_y * scale)
@@ -302,7 +317,6 @@ def runWorld():
         quit_text = fontMedium.render("(press Esc to quit)", True, THECOLORS['gray70'])
         text_width = quit_text.get_width()
         screen.blit(quit_text, (window_width - text_width - int(10 * scale), int(10 * scale)))
-
 
         space.step(1 / FPS)
         pygame.display.flip()

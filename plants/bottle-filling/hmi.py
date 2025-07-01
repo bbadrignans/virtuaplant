@@ -28,11 +28,6 @@ class HMIWindow:
         ports = {
             "plc": base_port
         }
-        if os.path.exists("ports.json"):
-            with open("ports.json", "r") as f:
-                saved_ports = json.load(f)
-            if saved_ports.get("plc") == base_port:
-                ports = saved_ports
 
         self.client = Client(address, port=ports["plc"])
         self.client.connect()

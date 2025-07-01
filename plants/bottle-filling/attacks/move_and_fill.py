@@ -12,6 +12,12 @@ import json
 import threading
 import contextlib 
 
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="Lancer le HMI pour VirtuaPlant.")
+    parser.add_argument("--ip", required=True, help="Adresse IP du serveur")
+    parser.add_argument("--port", type=int, required=True, help="Port du serveur PLC")
+    return parser.parse_args()
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 with open(os.devnull, 'w') as fnull, contextlib.redirect_stdout(fnull), contextlib.redirect_stderr(fnull):
@@ -40,7 +46,8 @@ while not os.path.exists(PORTS_FILE):
 with open(PORTS_FILE, "r") as f:
     ports = json.load(f)
 
-client = Client("localhost", port=ports["plc"])
+args = parse_arguments()
+client = Client(args.ip, args.port)
 
 stop_attack = False
 
