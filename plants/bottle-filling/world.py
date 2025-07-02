@@ -2,8 +2,8 @@
 
 import socket
 import sys
-import time   
-import socket        
+import time      
+import math
 import os
 import json
 import threading
@@ -40,6 +40,30 @@ FPS = 60.0
 NEXT_BOTTLE_DISTANCE = 100
 BOTTLE_SPACING = 60 
 
+dark_mode = False
+
+def get_theme_colors():
+    if dark_mode:
+        return {
+            "bg": THECOLORS["black"],           
+            "text": THECOLORS["gray90"],        
+            "title": THECOLORS["lightgreen"],   
+            "sensor": THECOLORS["lightcoral"],  
+            "polygon": THECOLORS["gray70"],     
+            "line": THECOLORS["darkgreen"],    
+            "ball": THECOLORS["lightgreen"]   
+        }
+    else:
+        return {
+            "bg": THECOLORS["white"],
+            "text": THECOLORS["gray20"],
+            "title": THECOLORS["deepskyblue"],
+            "sensor": THECOLORS["red"],
+            "polygon": THECOLORS["black"],
+            "line": THECOLORS["dodgerblue4"],
+            "ball": THECOLORS["blue"]
+        }
+
 def to_pygame(p, scale=1.0):
     return int(p.x * scale), int((-p.y + 600) * scale)
 
@@ -57,7 +81,7 @@ def add_ball(space):
 
 def draw_ball(screen, ball, scale=1.0, color=THECOLORS['blue']):
     p = to_pygame(ball.body.position, scale)
-    pygame.draw.circle(screen, color, p, max(1, int(ball.radius * scale)), 0)
+    pygame.draw.circle(screen, color, p, max(1, int(ball.radius * scale)), 2)
 
 def add_bottle(space):
     mass = 10
@@ -66,7 +90,7 @@ def add_bottle(space):
     body = pymunk.Body(mass, inertia)
     body.position = (130, 300)
 
-    l1 = pymunk.Segment(body, (-150, 0), (-100, 0), 3.9)
+    l1 = pymunk.Segment(body, (-150, 0), (-100, 0), 4.0)
     l2 = pymunk.Segment(body, (-150, 0), (-150, 100), 5.5)
     l3 = pymunk.Segment(body, (-100, 0), (-100, 100), 3.3)
 
@@ -117,7 +141,7 @@ def is_port_in_use(port):
 def run_servers():
     def start_server(obj):
         if is_port_in_use(obj.port):
-            print(f"Le port {obj.port} est déjà utilisé. Le serveur ne peut pas démarrer.")
+            print(f"the port {obj.port} is already in use. The server cannot start.")
         else:
             obj.start()
 
@@ -144,25 +168,61 @@ def is_sensor_touching_bottle(sensor_x, sensor_y, sensor_radius, bottles):
 
     return False
 
+def update_wheels(space, wheels, window_width, wheel_y, wheel_radius):
+    spacing = 137.5
+    min_wheels = 5
+    max_wheels = max(min_wheels, int(window_width / spacing) + 1)
+    current_count = len(wheels)
+
+    while len(wheels) > max_wheels:
+        wheel = wheels.pop()
+        for c in wheel.body.constraints:
+            space.remove(c)
+        space.remove(wheel, wheel.body)
+
+    while len(wheels) < max_wheels:
+        i = len(wheels)
+        wheel_x = i * spacing
+        mass = 1.0
+        moment = pymunk.moment_for_circle(mass, 0, wheel_radius)
+        wheel_body = pymunk.Body(mass, moment)
+        wheel_body.position = (wheel_x, wheel_y)
+        wheel_shape = pymunk.Circle(wheel_body, wheel_radius)
+        wheel_shape.friction = 1.0
+        wheel_shape.elasticity = 0.5
+        space.add(wheel_body, wheel_shape)
+
+        pivot = pymunk.PivotJoint(wheel_body, space.static_body, (wheel_x, wheel_y))
+        pivot.collide_bodies = False
+        space.add(pivot)
+
+        spring = pymunk.DampedRotarySpring(wheel_body, space.static_body, 0.0, 2000000.0, 10000.0)
+        space.add(spring)
+
+        wheels.append(wheel_shape)
+
 def runWorld():
+    global dark_mode
     pygame.init()
     screen = pygame.display.set_mode((WORLD_SCREEN_WIDTH, WORLD_SCREEN_HEIGHT), pygame.RESIZABLE)
     pygame.display.set_caption("VirtuaPlant - Bottle Filling Simulation")
+    icone = pygame.image.load("assets/github_icon.png")
+    pygame.display.set_icon(icone)
     clock = pygame.time.Clock()
-
-    window_width, window_height = screen.get_size()
-    scale_x = window_width / WORLD_SCREEN_WIDTH
-    scale_y = window_height / WORLD_SCREEN_HEIGHT
-    scale = min(scale_x, scale_y)
 
     space = pymunk.Space()
     space.gravity = (0.0, -900.0)
 
-    base = add_polygon(space, (WORLD_SCREEN_WIDTH / 2, 300), (WORLD_SCREEN_WIDTH, 20), 0x7)
-    nozzle_actuator = add_polygon(space, (180, 450), (15, 20), 0x9)
+    wheel_radius = 17
+    wheel_y = 280
+    wheels = []
 
-    bottle = add_bottle(space)
-    bottles.append(bottle)
+    base_shape = None
+    wheel_angles = []
+    wheel_rotation_speed = 0.05
+
+    nozzle_actuator = add_polygon(space, (181, 450), (15, 20), 0x9)
+    bottles.append(add_bottle(space))
     balls = []
 
     sensor_body = pymunk.Body(body_type=pymunk.Body.STATIC)
@@ -179,10 +239,11 @@ def runWorld():
     pygame.time.set_timer(pygame.event.Event(MODBUS_EVENT), 1, 1)
     pygame.time.set_timer(pygame.event.Event(RESIZE_EVENT), 1, 1)
 
+    colors = get_theme_colors()
+
     while running:
 
         clock.tick(FPS)
-        screen.fill(THECOLORS["white"])
 
         for event in pygame.event.get():
             if event.type == QUIT or (event.type == KEYDOWN and event.key == K_ESCAPE):
@@ -217,16 +278,15 @@ def runWorld():
                     nozzle_start_time = None
                     sensor_triggered = False
 
-                current_time = time.time()
 
                 if is_sensor_touching_bottle(sensor_x, sensor_y, sensor_radius, bottles) and not sensor_triggered:
-                    if current_time - last_sensor_trigger_time >= 2.3:
+                    if time.time() - last_sensor_trigger_time >= 2.3:
                         sensor_triggered = True
                         plc['contact'].write(0, 1)
                         plc['nozzle'].write(0, 1)
-                        nozzle_start_time = current_time
-                        threading.Timer(1.8, lambda: plc['contact'].write(0, 0)).start()
-                        last_sensor_trigger_time = current_time
+                        nozzle_start_time = time.time()
+                        threading.Timer(1.8, lambda: plc['contact'].write(0, 0)).start( )
+                        last_sensor_trigger_time = time.time()
 
                 pygame.time.set_timer(pygame.event.Event(MODBUS_EVENT), 100, 1)
 
@@ -241,13 +301,23 @@ def runWorld():
                 fontMedium = pygame.font.SysFont(None, int(26 * scale))
 
                 sensor_x = WORLD_SCREEN_WIDTH // 3.58
-                sensor_y = WORLD_SCREEN_HEIGHT // 1.68
+                sensor_y = WORLD_SCREEN_HEIGHT // 1.66
                 sensor_radius = 1.5
-                sensor_radius_scaled = int(sensor_radius * scale)
 
                 pygame.time.set_timer(pygame.event.Event(RESIZE_EVENT), 500, 1)
 
-        if nozzle_state == 1:
+        update_wheels(space, wheels, window_width, wheel_y, wheel_radius)
+        if len(wheel_angles) != len(wheels):
+            wheel_angles = [0.0 for _ in wheels]
+
+        if base_shape:
+            space.remove(base_shape, base_shape.body)
+        base_width = window_width / scale
+        base_shape = add_polygon(space, (base_width / 2, 300), (base_width, 20), 0x7)
+
+        screen.fill(colors["bg"])
+
+        if nozzle_state == 1 :
             if bottles:
                 balls.append((add_ball(space), bottles[-1][0].body))
             else:
@@ -256,8 +326,7 @@ def runWorld():
 
         if motor_state == 1:
             for bottle in bottles:
-                body = bottle[0].body
-                body.position = (body.position.x + 0.25, body.position.y)
+                bottle[0].body.position = (bottle[0].body.position.x + 0.25, bottle[0].body.position.y)
 
         if tag_run == 1:
             if not bottles or (bottles[-1][0].body.position.x > 130 + BOTTLE_SPACING):
@@ -265,58 +334,181 @@ def runWorld():
                 new_bottle[0].body.position = pymunk.Vec2d(130, 300)
                 bottles.append(new_bottle)
 
+        nozzle_rect_color = (232, 232, 232) if not dark_mode else (50, 50, 80)
+
+        nozzle_center_x = 180
+        nozzle_top_y = 450
+        nozzle_width = 15
+        nozzle_height = 20
+
+        extra_width = 60
+        extra_height_top = 20 
+        extra_height_bottom = -10  
+
+        rect_x = int((nozzle_center_x - nozzle_width - extra_width / 2) * scale)
+        rect_y = int((600 - nozzle_top_y - nozzle_height - extra_height_top) * scale)
+        rect_width = int((nozzle_width * 2 + extra_width) * scale)
+        rect_height = int((nozzle_height + extra_height_top + (nozzle_top_y - 280) + extra_height_bottom) * scale)
+
+        pygame.draw.rect(
+            screen,
+            nozzle_rect_color,
+            pygame.Rect(rect_x, rect_y, rect_width, rect_height),
+            border_radius=0,
+            border_top_left_radius=int(48 * scale),
+            border_top_right_radius=int(48 * scale)
+        )
+
+        # TRIANGLE OF THE NOZZLE
+
+        triangle_color = colors["polygon"]
+
+        triangle_base_x = (nozzle_center_x + 1) * scale
+        triangle_base_y = (610 - nozzle_top_y) * scale
+
+        triangle_width = 15 * scale
+        triangle_height = 11 * scale
+
+        triangle_points = [
+            (triangle_base_x, triangle_base_y + triangle_height),
+            (triangle_base_x - triangle_width / 2, triangle_base_y),
+            (triangle_base_x + triangle_width / 2, triangle_base_y)
+        ]
+
+        pygame.draw.polygon(screen, triangle_color, triangle_points)
+
+        if not sensor_triggered:
+            screen_x = int(sensor_x * scale)
+            screen_y = int(sensor_y * scale)
+            line_height = int(111 * scale) 
+            line_width = max(1, int(0.5 * scale)) 
+
+            line_rect = pygame.Rect(
+                screen_x - line_width // 2,
+                screen_y - line_height // 2,
+                line_width,
+                line_height
+            )
+            pygame.draw.rect(screen, colors["sensor"], line_rect)
+
+            ball_color = (255, 0, 0)
+            ball_radius = 3 * scale
+            ball_center_x = (nozzle_center_x - 32) * scale + 25 * scale + ball_radius + -23 * scale
+            ball_center_y = (598 - nozzle_top_y + 6) * scale + 7 * scale / 2
+            pygame.draw.circle(screen, ball_color, (int(ball_center_x), int(ball_center_y)), int(ball_radius))
+
+        # RECTANGLE OF "BASE_SHAPE"
+
+        rect_color = (0, 0, 0)
+
+        rect_x = (nozzle_center_x - 35) * scale
+        rect_y = (598 - nozzle_top_y) * scale
+
+        rect_width = 30 * scale
+        rect_height = 7 * scale
+
+        pygame.draw.rect(screen, rect_color, pygame.Rect(rect_x, rect_y, rect_width, rect_height))
+
+        # RECTANGLE OF "BASE_SHAPE"
+
+        rect_color2 = (0, 0, 0)
+        rect_x2 = (nozzle_center_x - 30.2) * scale
+        rect_y2 = (601 - nozzle_top_y) * scale
+        rect_width2 = 7 * scale
+        rect_height2 = 7 * scale
+        pygame.draw.rect(screen, rect_color2, pygame.Rect(rect_x2, rect_y2, rect_width2, rect_height2))
+
         for ball_data in balls[:]:
-            ball, ball_bottle = ball_data
+            ball, _ = ball_data
             if ball.body.position.y < 0 or ball.body.position.x > WORLD_SCREEN_WIDTH + 1500:
                 space.remove(ball, ball.body)
                 balls.remove(ball_data)
             else:
-                draw_ball(screen, ball, scale)
+                draw_ball(screen, ball, scale, color=colors["ball"])
 
         for bottle in bottles[:]:
             pos_x = bottle[0].body.position.x
-            pos_y = bottle[0].body.position.y
             screen_pos_x = pos_x * scale
-            if screen_pos_x > window_width + 1500 or pos_y < 150:
-
+            if screen_pos_x > window_width + 1500 or bottle[0].body.position.y < 150:
                 for ball_data in balls[:]:
                     ball, ball_bottle = ball_data
-                    if ball_bottle == bottle:  
+                    if ball_bottle == bottle:
                         space.remove(ball, ball.body)
                         balls.remove(ball_data)
-
                 for segment in bottle:
                     space.remove(segment)
                 space.remove(bottle[0].body)
                 bottles.remove(bottle)
             else:
-                draw_lines(screen, bottle, scale)
+                draw_lines(screen, bottle, scale, color=colors["line"])
 
-        if 'base_shape' in locals():
-            space.remove(base_shape, base_shape.body)
+        draw_polygon(screen, base_shape, scale, color=colors["polygon"])
 
-        base_width = window_width / scale
-        base_shape = add_polygon(space, (base_width / 2, 300), (base_width, 20), 0x7)
+        # VERTICALE LINE OF "BUSE_SHAPE"
 
-        draw_polygon(screen, base_shape, scale)
+        line_color = (179, 179, 179)
+        line_width = max(1, int(3 * scale))
+        line_height = int(8 * scale)
+        base_rect_bottom_y = (600 - 300 + 4) * scale
 
-        if not sensor_triggered:
-            screen_x = int(sensor_x * scale)
-            screen_y = int(sensor_y * scale)
-            pygame.draw.circle(screen, THECOLORS['red'], (screen_x, screen_y), int(sensor_radius * scale))
+        base_width = base_shape.bb.right - base_shape.bb.left
 
-        draw_polygon(screen, nozzle_actuator, scale)
+        line_scroll_speed = 0.26 if plc['motor'].read(0) == 1 else 0.0
+        if not hasattr(runWorld, "line_offset"):
+            runWorld.line_offset = 0
+        runWorld.line_offset += line_scroll_speed
+        spacing_px = 70
+        if runWorld.line_offset >= spacing_px:
+            runWorld.line_offset -= spacing_px
 
-        screen.blit(fontMedium.render("Bottle-filling factory", 1, THECOLORS['deepskyblue']), (int(10 * scale), int(10 * scale)))
-        title_y = int(10 * scale)   
-        screen.blit(fontMedium.render("Bottle-filling factory", 1, THECOLORS['deepskyblue']), (int(10 * scale), title_y))
+        line_color = (179, 179, 179)
+        line_width = max(1, int(3 * scale))
+        line_height = int(8 * scale)
+        base_rect_bottom_y = (600 - 300 + 4) * scale
 
+        num_lines = int(base_width / spacing_px) + 2
+        for i in range(num_lines):
+            x = base_shape.bb.left + (i * spacing_px) + runWorld.line_offset 
+            screen_x = int(x * scale) 
+            screen_y_start = int(base_rect_bottom_y - line_height) 
+
+            pygame.draw.line(
+                screen,
+                line_color,
+                (screen_x, screen_y_start),
+                (screen_x, screen_y_start + line_height),
+                line_width
+            )
+
+        for idx, wheel in enumerate(wheels):
+            center = to_pygame(wheel.body.position, scale)
+            radius = int(wheel.radius * scale)
+
+            if tag_motor == 1:
+                wheel_angles[idx] += wheel_rotation_speed
+
+            border_color = THECOLORS["gray"] if dark_mode else THECOLORS["white"]
+            pygame.draw.circle(screen, border_color, center, radius + 2)
+
+            pygame.draw.circle(screen, THECOLORS["black"], center, radius)
+
+            for s in range(6):
+                angle = wheel_angles[idx] + (2 * math.pi * s / 6)
+                end_x = center[0] + radius * 0.7 * math.cos(angle)
+                end_y = center[1] + radius * 0.7 * math.sin(angle)
+                pygame.draw.line(screen, THECOLORS["gray70"], center, (int(end_x), int(end_y)), 2)
+
+            pygame.draw.circle(screen, THECOLORS["black"], center, radius, 2)
+
+        draw_polygon(screen, nozzle_actuator, scale, color=colors["polygon"])
+
+        screen.blit(fontMedium.render("Bottle-filling factory", 1, colors["title"]), (int(10 * scale), int(10 * scale)))
+        title_y = int(10 * scale)
         virtua_y = title_y + fontMedium.get_height() + int(4 * scale)
-        screen.blit(fontBig.render("VirtuaPlant", 1, THECOLORS['gray20']), (int(10 * scale), virtua_y))
+        screen.blit(fontBig.render("VirtuaPlant", 1, colors["text"]), (int(10 * scale), virtua_y))
 
-        quit_text = fontMedium.render("(press Esc to quit)", True, THECOLORS['gray70'])
-        text_width = quit_text.get_width()
-        screen.blit(quit_text, (window_width - text_width - int(10 * scale), int(10 * scale)))
+        quit_text = fontMedium.render("(press Esc to quit)", True, colors["text"])
+        screen.blit(quit_text, (window_width - quit_text.get_width() - int(10 * scale), int(10 * scale)))
 
         space.step(1 / FPS)
         pygame.display.flip()
@@ -336,7 +528,7 @@ def parse_arguments():
 
         return ip, port
     except (ValueError, IndexError):
-        print("Utilisation correcte : python3 world.py --ip <IP> --port <PORT>")
+        print("Correct Use : python3 world.py --ip <IP> --port <PORT>")
         sys.exit(1)
 
 def main():
