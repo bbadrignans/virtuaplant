@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-
 import socket
 import sys
 import time      
@@ -18,12 +17,28 @@ from modbus import ServerModbus as Server, ClientModbus as Client
 # PLC addresses
 PLC_SERVER_IP = "localhost"
 PLC_RW_ADDR = 0x0
-PLC_TAG_RUN = 0x0
 PLC_RO_ADDR = 0x3E8
+PLC_TAG_RUN = 0x0
 PLC_TAG_LEVEL = 0x1
 PLC_TAG_CONTACT = 0x2
 PLC_TAG_MOTOR = 0x3
 PLC_TAG_NOZZLE = 0x4
+
+# MOTOR actuator
+MOTOR_RW_ADDR = 0x0
+MOTOR_TAG_RUN = 0x0
+
+# NOZZLE actuator
+NOZZLE_RW_ADDR = 0x0
+NOZZLE_TAG_RUN = 0x0
+
+# LEVEL sensor
+LEVEL_RO_ADDR = 0x0
+LEVEL_TAG_SENSOR = 0x0
+
+# CONTACT sensor
+CONTACT_RO_ADDR = 0x0
+CONTACT_TAG_SENSOR = 0x0
 
 # Globals
 plc = {}
@@ -134,16 +149,9 @@ def add_polygon(space, pos, size, collision_type):
     space.add(body, shape)  
     return shape
 
-def is_port_in_use(port):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(("localhost", port)) == 0
-
 def run_servers():
     def start_server(obj):
-        if is_port_in_use(obj.port):
-            print(f"the port {obj.port} is already in use. The server cannot start.")
-        else:
-            obj.start()
+        obj.start()
 
     for server in [plc['server'], motor['server'], nozzle['server'], level['server'], contact['server']]:
         threading.Thread(target=start_server, args=(server,), daemon=True).start()
@@ -221,6 +229,17 @@ def runWorld():
     wheel_angles = []
     wheel_rotation_speed = 0.05
 
+    nozzle_rect_color = (232, 232, 232) if not dark_mode else (50, 50, 80)
+
+    nozzle_center_x = 180
+    nozzle_top_y = 450
+    nozzle_width = 15
+    nozzle_height = 20
+
+    extra_width = 60
+    extra_height_top = 20 
+    extra_height_bottom = -10  
+
     nozzle_actuator = add_polygon(space, (181, 450), (15, 20), 0x9)
     bottles.append(add_bottle(space))
     balls = []
@@ -235,11 +254,13 @@ def runWorld():
 
     MODBUS_EVENT = pygame.event.custom_type() 
     RESIZE_EVENT = pygame.event.custom_type() 
+    pygame.event.set_allowed([QUIT, KEYDOWN, K_ESCAPE, MODBUS_EVENT, RESIZE_EVENT])
 
     pygame.time.set_timer(pygame.event.Event(MODBUS_EVENT), 1, 1)
     pygame.time.set_timer(pygame.event.Event(RESIZE_EVENT), 1, 1)
 
     colors = get_theme_colors()
+    triangle_color = colors["polygon"]
 
     while running:
 
@@ -253,31 +274,32 @@ def runWorld():
             if event.type == MODBUS_EVENT:
                 # Manage plc
                 # Read remote/local variables
-                tag_level = plc['level'].read(0)
-                tag_contact = plc['contact'].read(0)
-                tag_run = plc['server'].read(PLC_RW_ADDR + PLC_TAG_RUN)
+                tag_level   = plc['level'].read(LEVEL_RO_ADDR + LEVEL_TAG_SENSOR)
+                tag_contact = plc['contact'].read(CONTACT_RO_ADDR + CONTACT_TAG_SENSOR)
+                tag_run     = plc['server'].read(PLC_RW_ADDR + PLC_TAG_RUN) 
 
                 # Manage PLC programm
                 # Motor Logic
                 tag_motor = 1 if tag_run == 1 and (tag_contact == 0 or tag_level == 1) else 0
+                # Nozzle Logic 
                 tag_nozzle = 1 if tag_run == 1 and tag_contact == 1 and tag_level == 0 else 0
 
-                plc['motor'].write(0, tag_motor)
-                plc['nozzle'].write(0, tag_nozzle)
+                # Write remote/local variables
+                plc['motor'].write(MOTOR_RW_ADDR + MOTOR_TAG_RUN, tag_motor)
+                plc['nozzle'].write(NOZZLE_RW_ADDR + NOZZLE_TAG_RUN, tag_nozzle)
 
                 plc['server'].write(PLC_RO_ADDR + PLC_TAG_LEVEL, tag_level)
                 plc['server'].write(PLC_RO_ADDR + PLC_TAG_CONTACT, tag_contact)
                 plc['server'].write(PLC_RO_ADDR + PLC_TAG_MOTOR, tag_motor)
                 plc['server'].write(PLC_RO_ADDR + PLC_TAG_NOZZLE, tag_nozzle)
 
-                nozzle_state = nozzle['server'].read(0)
-                motor_state = motor['server'].read(0)
+                nozzle_state = nozzle['server'].read(NOZZLE_RW_ADDR + NOZZLE_TAG_RUN)
+                motor_state = motor['server'].read(MOTOR_RW_ADDR + MOTOR_TAG_RUN)
 
                 if nozzle_start_time and (time.time() - nozzle_start_time >= 1.5):
                     plc['nozzle'].write(0, 0)
                     nozzle_start_time = None
                     sensor_triggered = False
-
 
                 if is_sensor_touching_bottle(sensor_x, sensor_y, sensor_radius, bottles) and not sensor_triggered:
                     if time.time() - last_sensor_trigger_time >= 2.3:
@@ -303,6 +325,7 @@ def runWorld():
                 sensor_x = WORLD_SCREEN_WIDTH // 3.58
                 sensor_y = WORLD_SCREEN_HEIGHT // 1.66
                 sensor_radius = 1.5
+
 
                 pygame.time.set_timer(pygame.event.Event(RESIZE_EVENT), 500, 1)
 
@@ -334,17 +357,6 @@ def runWorld():
                 new_bottle[0].body.position = pymunk.Vec2d(130, 300)
                 bottles.append(new_bottle)
 
-        nozzle_rect_color = (232, 232, 232) if not dark_mode else (50, 50, 80)
-
-        nozzle_center_x = 180
-        nozzle_top_y = 450
-        nozzle_width = 15
-        nozzle_height = 20
-
-        extra_width = 60
-        extra_height_top = 20 
-        extra_height_bottom = -10  
-
         rect_x = int((nozzle_center_x - nozzle_width - extra_width / 2) * scale)
         rect_y = int((600 - nozzle_top_y - nozzle_height - extra_height_top) * scale)
         rect_width = int((nozzle_width * 2 + extra_width) * scale)
@@ -360,9 +372,6 @@ def runWorld():
         )
 
         # TRIANGLE OF THE NOZZLE
-
-        triangle_color = colors["polygon"]
-
         triangle_base_x = (nozzle_center_x + 1) * scale
         triangle_base_y = (610 - nozzle_top_y) * scale
 
@@ -398,7 +407,6 @@ def runWorld():
             pygame.draw.circle(screen, ball_color, (int(ball_center_x), int(ball_center_y)), int(ball_radius))
 
         # RECTANGLE OF "BASE_SHAPE"
-
         rect_color = (0, 0, 0)
 
         rect_x = (nozzle_center_x - 35) * scale
@@ -544,18 +552,22 @@ def main():
         "contact": base_port + 4
     }
 
-    plc['server'] = Server(ip, port=ports["plc"])
+    # Initialise motor, nozzle, level and contact components
     motor['server'] = Server(ip, port=ports["motor"])
     nozzle['server'] = Server(ip, port=ports["nozzle"])
     level['server'] = Server(ip, port=ports["level"])
     contact['server'] = Server(ip, port=ports["contact"])
+
+    # Initialise plc component
+    plc['server'] = Server(ip, port=ports["plc"])
+    run_servers()  
 
     plc['motor'] = Client(ip, port=ports["motor"])
     plc['nozzle'] = Client(ip, port=ports["nozzle"])
     plc['level'] = Client(ip, port=ports["level"])
     plc['contact'] = Client(ip, port=ports["contact"])
 
-    run_servers()  
+    # Run World
     runWorld()    
 
 if __name__ == "__main__":
