@@ -243,6 +243,11 @@ def runWorld():
     nozzle_width = 15
     nozzle_height = 20
 
+    level_sensor_x = 197
+    level_sensor_y = 230
+    level_sensor_width = 5
+    level_sensor_height = 5
+
     extra_width = 60
     extra_height_top = 20 
     extra_height_bottom = -10  
@@ -272,6 +277,8 @@ def runWorld():
     while running:
 
         clock.tick(FPS)
+        point = pygame.mouse.get_pos()
+        log.info(point)
 
         for event in pygame.event.get():
             if event.type == QUIT or (event.type == KEYDOWN and event.key == K_ESCAPE):
@@ -283,7 +290,8 @@ def runWorld():
                 # Read remote/local variables
                 tag_level   = plc['level'].read(LEVEL_RO_ADDR + LEVEL_TAG_SENSOR)
                 tag_contact = plc['contact'].read(CONTACT_RO_ADDR + CONTACT_TAG_SENSOR)
-                tag_run     = plc['server'].read(PLC_RW_ADDR + PLC_TAG_RUN) 
+                tag_run     = 1
+                #FIXME tag_run     = plc['server'].read(PLC_RW_ADDR + PLC_TAG_RUN) 
 
                 # Manage PLC programm
                 # Motor Logic
@@ -333,8 +341,7 @@ def runWorld():
                 sensor_y = WORLD_SCREEN_HEIGHT // 1.66
                 sensor_radius = 1.5
 
-
-                pygame.time.set_timer(pygame.event.Event(RESIZE_EVENT), 500, 1)
+                pygame.time.set_timer(pygame.event.Event(RESIZE_EVENT), 1000, 1)
 
         update_wheels(space, wheels, window_width, wheel_y, wheel_radius)
         if len(wheel_angles) != len(wheels):
@@ -425,7 +432,6 @@ def runWorld():
         pygame.draw.rect(screen, rect_color, pygame.Rect(rect_x, rect_y, rect_width, rect_height))
 
         # RECTANGLE OF "BASE_SHAPE"
-
         rect_color2 = (0, 0, 0)
         rect_x2 = (nozzle_center_x - 30.2) * scale
         rect_y2 = (601 - nozzle_top_y) * scale
@@ -433,8 +439,23 @@ def runWorld():
         rect_height2 = 7 * scale
         pygame.draw.rect(screen, rect_color2, pygame.Rect(rect_x2, rect_y2, rect_width2, rect_height2))
 
+        #Draw level sensor
+        rect_color = (0, 0, 0)
+        rect_x = (level_sensor_x) * scale
+        rect_y = (level_sensor_y) * scale
+        rect_width = level_sensor_width * scale
+        rect_height = level_sensor_height * scale
+        level_sensor = pygame.Rect(rect_x, rect_y, rect_width, rect_height)
+        pygame.draw.rect(screen, rect_color, level_sensor)
+
         for ball_data in balls[:]:
             ball, _ = ball_data
+
+            # Detect collision with level sensor
+            x,y = to_pygame(ball.body.position, scale)
+            if (( int(y) > level_sensor_y and int(y) < level_sensor_y + level_sensor_height ) and ( int(x) > level_sensor_x and int(x) < level_sensor_x + level_sensor_width )):
+                log.info("Sensor level triggered")
+
             if ball.body.position.y < 0 or ball.body.position.x > WORLD_SCREEN_WIDTH + 1500:
                 space.remove(ball, ball.body)
                 balls.remove(ball_data)
@@ -588,7 +609,7 @@ def main():
     # Initialise plc component
     plc['server'] = Server(ip, port=ports["plc"])
     run_servers()  
-    log.debug("Modbus server started")
+    log.info("Modbus server started")
 
     plc['motor'] = Client(ip, port=ports["motor"])
     plc['nozzle'] = Client(ip, port=ports["nozzle"])
