@@ -8,7 +8,7 @@ from pymodbus.datastore import ModbusSequentialDataBlock, ModbusSlaveContext, Mo
 from pymodbus.exceptions import ConnectionException
 from pymodbus.transaction import ModbusSocketFramer
 
-MODBUS_PORT = 2052
+MODBUS_PORT = 502
 
 class ClientModbus(ModbusTcpClient):    
     def __init__(self, address, port=MODBUS_PORT):
@@ -41,6 +41,7 @@ class ServerModbus:
     def __init__(self, address="localhost", port=MODBUS_PORT):
         self.address = address
         self.port = port
+        self.allow_reuse_address = True
         self.block = ModbusSequentialDataBlock(0x00, [0]*0x3ff)
         store = ModbusSlaveContext(di=self.block, co=self.block, hr=self.block, ir=self.block)
         self.context = ModbusServerContext(slaves=store, single=True)
@@ -62,7 +63,6 @@ class ServerModbus:
         StartTcpServer(context=self.context, identity=self.identity, address=(self.address, self.port))
 
 def main():
-    print("Modbus TCP prêt.")
     server = ServerModbus()
     server.start()
     return 0
