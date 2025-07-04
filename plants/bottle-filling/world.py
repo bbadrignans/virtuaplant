@@ -8,11 +8,18 @@ import json
 import threading
 import random
 import pygame
+import logging
+import argparse
+import getopt
 from pygame.locals import *
 from pygame.color import THECOLORS
 
 import pymunk
 from modbus import ServerModbus as Server, ClientModbus as Client
+
+# Logging
+logging.basicConfig()
+log = logging.getLogger()
 
 # PLC addresses
 PLC_SERVER_IP = "localhost"
@@ -526,24 +533,44 @@ def draw_polygon(screen, shape, scale=1.0, color=THECOLORS['black']):
     points = [to_pygame(v.rotated(shape.body.angle) + shape.body.position, scale) for v in vertices]
     pygame.draw.polygon(screen, color, points)
 
-def parse_arguments():
-    try:
-        ip_index = sys.argv.index("--ip") + 1
-        port_index = sys.argv.index("--port") + 1
-
-        ip = sys.argv[ip_index]
-        port = int(sys.argv[port_index])
-
-        return ip, port
-    except (ValueError, IndexError):
-        print("Correct Use : python3 world.py --ip <IP> --port <PORT>")
-        sys.exit(1)
+# Help
+def help():
+    print (sys.argv[0], '[options] -i <IP> -p <port>')
+    print ("    \t-i Modbus server IP")
+    print ("    \t-p Modbus server port")
+    print ("Options :")
+    print ("    \t-h print this help then exit")
+    print ("    \t-d debug")
 
 def main():
     global plc, motor, nozzle, level, contact
 
-    ip, base_port = parse_arguments()
+    # Default values
+    log.setLevel(logging.INFO)
+    ip="localhost"
+    port=1502
 
+    # Get options
+    try:
+        opts, args = getopt.getopt(sys.argv[1:],"hdi:p:")
+    except getopt.GetoptError as err:
+        print(err)  
+        help()
+        sys.exit(1)
+
+    for opt, arg in opts:
+        if opt == '-h':
+            help()
+            sys.exit(0)
+        elif opt in ("-i"):
+            ip = arg
+        elif opt in ("-p"):
+            port = int(arg)
+            clearAllSlots = 1
+        elif opt in ("-d"):
+            log.setLevel(logging.DEBUG)
+
+    base_port = port
     ports = {
         "plc": base_port,
         "motor": base_port + 1,
@@ -561,6 +588,7 @@ def main():
     # Initialise plc component
     plc['server'] = Server(ip, port=ports["plc"])
     run_servers()  
+    log.debug("Modbus server started")
 
     plc['motor'] = Client(ip, port=ports["motor"])
     plc['nozzle'] = Client(ip, port=ports["nozzle"])
