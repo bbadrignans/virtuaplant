@@ -217,8 +217,11 @@ def update_wheels(space, wheels, window_width, wheel_y, wheel_radius):
         wheels.append(wheel_shape)
 
 def runWorld():
+
     global dark_mode
+
     pygame.init()
+
     screen = pygame.display.set_mode((WORLD_SCREEN_WIDTH, WORLD_SCREEN_HEIGHT), pygame.RESIZABLE)
     pygame.display.set_caption("VirtuaPlant - Bottle Filling Simulation")
     icone = pygame.image.load("assets/github_icon.png")
@@ -260,9 +263,7 @@ def runWorld():
     sensor_body.position = (WORLD_SCREEN_WIDTH // 3.7, 600 - WORLD_SCREEN_HEIGHT // 1.68)
 
     running = True
-    last_sensor_trigger_time = time.time()
-    nozzle_start_time = None
-    sensor_triggered = False
+    bottle_sensor_triggered = False
 
     MODBUS_EVENT = pygame.event.custom_type() 
     RESIZE_EVENT = pygame.event.custom_type() 
@@ -277,55 +278,10 @@ def runWorld():
     while running:
 
         clock.tick(FPS)
-        point = pygame.mouse.get_pos()
-        log.info(point)
 
         for event in pygame.event.get():
             if event.type == QUIT or (event.type == KEYDOWN and event.key == K_ESCAPE):
                 running = False
-
-            #Update Modbus registers
-            if event.type == MODBUS_EVENT:
-                # Manage plc
-                # Read remote/local variables
-                tag_level   = plc['level'].read(LEVEL_RO_ADDR + LEVEL_TAG_SENSOR)
-                tag_contact = plc['contact'].read(CONTACT_RO_ADDR + CONTACT_TAG_SENSOR)
-                tag_run     = 1
-                #FIXME tag_run     = plc['server'].read(PLC_RW_ADDR + PLC_TAG_RUN) 
-
-                # Manage PLC programm
-                # Motor Logic
-                tag_motor = 1 if tag_run == 1 and (tag_contact == 0 or tag_level == 1) else 0
-                # Nozzle Logic 
-                tag_nozzle = 1 if tag_run == 1 and tag_contact == 1 and tag_level == 0 else 0
-
-                # Write remote/local variables
-                plc['motor'].write(MOTOR_RW_ADDR + MOTOR_TAG_RUN, tag_motor)
-                plc['nozzle'].write(NOZZLE_RW_ADDR + NOZZLE_TAG_RUN, tag_nozzle)
-
-                plc['server'].write(PLC_RO_ADDR + PLC_TAG_LEVEL, tag_level)
-                plc['server'].write(PLC_RO_ADDR + PLC_TAG_CONTACT, tag_contact)
-                plc['server'].write(PLC_RO_ADDR + PLC_TAG_MOTOR, tag_motor)
-                plc['server'].write(PLC_RO_ADDR + PLC_TAG_NOZZLE, tag_nozzle)
-
-                nozzle_state = nozzle['server'].read(NOZZLE_RW_ADDR + NOZZLE_TAG_RUN)
-                motor_state = motor['server'].read(MOTOR_RW_ADDR + MOTOR_TAG_RUN)
-
-                if nozzle_start_time and (time.time() - nozzle_start_time >= 1.5):
-                    plc['nozzle'].write(0, 0)
-                    nozzle_start_time = None
-                    sensor_triggered = False
-
-                if is_sensor_touching_bottle(sensor_x, sensor_y, sensor_radius, bottles) and not sensor_triggered:
-                    if time.time() - last_sensor_trigger_time >= 2.3:
-                        sensor_triggered = True
-                        plc['contact'].write(0, 1)
-                        plc['nozzle'].write(0, 1)
-                        nozzle_start_time = time.time()
-                        threading.Timer(1.8, lambda: plc['contact'].write(0, 0)).start( )
-                        last_sensor_trigger_time = time.time()
-
-                pygame.time.set_timer(pygame.event.Event(MODBUS_EVENT), 100, 1)
 
             #Update screen size
             if event.type == RESIZE_EVENT:
@@ -343,6 +299,55 @@ def runWorld():
 
                 pygame.time.set_timer(pygame.event.Event(RESIZE_EVENT), 1000, 1)
 
+                point = pygame.mouse.get_pos()
+                log.debug(point)
+
+            #Update Modbus registers
+            if event.type == MODBUS_EVENT:
+                # Manage plc
+                # Read remote/local variables
+                tag_level   = plc['level'].read(LEVEL_RO_ADDR + LEVEL_TAG_SENSOR)
+                tag_contact = plc['contact'].read(CONTACT_RO_ADDR + CONTACT_TAG_SENSOR)
+                tag_run     = 1
+                #FIXME tag_run     = plc['server'].read(PLC_RW_ADDR + PLC_TAG_RUN) 
+
+                # Manage PLC programm
+                # Motor Logic
+                if (tag_run == 1) and ((tag_contact == 0) or (tag_level == 1)):
+                    tag_motor = 1
+                else:
+                    tag_motor = 0
+
+                # Nozzle Logic 
+                if (tag_run == 1) and ((tag_contact == 1) and (tag_level == 0)):
+                    tag_nozzle = 1
+                else:
+                    tag_nozzle = 0
+
+                log.info ("level=" + str(tag_level) + " ,contact=" + str(tag_contact) + ", nozzle=" + str(tag_nozzle) + "motor=" + str(tag_motor))
+
+                # Write remote/local variables
+                plc['motor'].write(MOTOR_RW_ADDR + MOTOR_TAG_RUN, tag_motor)
+                plc['nozzle'].write(NOZZLE_RW_ADDR + NOZZLE_TAG_RUN, tag_nozzle)
+
+                plc['server'].write(PLC_RO_ADDR + PLC_TAG_LEVEL, tag_level)
+                plc['server'].write(PLC_RO_ADDR + PLC_TAG_CONTACT, tag_contact)
+                plc['server'].write(PLC_RO_ADDR + PLC_TAG_MOTOR, tag_motor)
+                plc['server'].write(PLC_RO_ADDR + PLC_TAG_NOZZLE, tag_nozzle)
+
+                nozzle_state = nozzle['server'].read(NOZZLE_RW_ADDR + NOZZLE_TAG_RUN)
+                motor_state = motor['server'].read(MOTOR_RW_ADDR + MOTOR_TAG_RUN)
+
+                if is_sensor_touching_bottle(sensor_x, sensor_y, sensor_radius, bottles):
+                    bottle_sensor_triggered = True
+                    plc['contact'].write(0, 1)
+                    plc['nozzle'].write(0, 1)
+                else:
+                    plc['contact'].write(0, 0)
+                    bottle_sensor_triggered = False
+
+                pygame.time.set_timer(pygame.event.Event(MODBUS_EVENT), 100, 1)
+
         update_wheels(space, wheels, window_width, wheel_y, wheel_radius)
         if len(wheel_angles) != len(wheels):
             wheel_angles = [0.0 for _ in wheels]
@@ -359,7 +364,6 @@ def runWorld():
                 balls.append((add_ball(space), bottles[-1][0].body))
             else:
                 balls.append((add_ball(space), None))
-            last_sensor_trigger_time = time.time()
 
         if motor_state == 1:
             for bottle in bottles:
@@ -400,7 +404,7 @@ def runWorld():
 
         pygame.draw.polygon(screen, triangle_color, triangle_points)
 
-        if not sensor_triggered:
+        if not bottle_sensor_triggered:
             screen_x = int(sensor_x * scale)
             screen_y = int(sensor_y * scale)
             line_height = int(111 * scale) 
@@ -448,6 +452,7 @@ def runWorld():
         level_sensor = pygame.Rect(rect_x, rect_y, rect_width, rect_height)
         pygame.draw.rect(screen, rect_color, level_sensor)
 
+        flag_sensor_level=False
         for ball_data in balls[:]:
             ball, _ = ball_data
 
@@ -455,12 +460,18 @@ def runWorld():
             x,y = to_pygame(ball.body.position, scale)
             if (( int(y) > level_sensor_y and int(y) < level_sensor_y + level_sensor_height ) and ( int(x) > level_sensor_x and int(x) < level_sensor_x + level_sensor_width )):
                 log.info("Sensor level triggered")
+                plc['nozzle'].write(0, 0)
+                plc['level'].write(0, 1)
+                flag_sensor_level=True
 
             if ball.body.position.y < 0 or ball.body.position.x > WORLD_SCREEN_WIDTH + 1500:
                 space.remove(ball, ball.body)
                 balls.remove(ball_data)
             else:
                 draw_ball(screen, ball, scale, color=colors["ball"])
+
+        if ( flag_sensor_level == False ):
+            plc['level'].write(0, 0)
 
         for bottle in bottles[:]:
             pos_x = bottle[0].body.position.x
