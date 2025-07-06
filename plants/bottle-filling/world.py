@@ -17,6 +17,9 @@ from pygame.color import THECOLORS
 import pymunk
 from modbus import ServerModbus as Server, ClientModbus as Client
 
+dark_mode = False
+speed = 0.25
+
 # Logging
 logging.basicConfig()
 log = logging.getLogger()
@@ -62,7 +65,28 @@ FPS = 60.0
 NEXT_BOTTLE_DISTANCE = 100
 BOTTLE_SPACING = 60 
 
-dark_mode = False
+nozzle_center_x = 180
+nozzle_top_y = 450
+nozzle_width = 15
+nozzle_height = 20
+extra_width = 60
+extra_height_top = 20 
+extra_height_bottom = -10  
+
+level_sensor_x = 160
+level_sensor_y = 222
+level_sensor_width = 5
+level_sensor_height = 5
+
+sensor_x = WORLD_SCREEN_WIDTH // 3.58
+sensor_y = WORLD_SCREEN_HEIGHT // 1.66
+
+wheel_radius = 17
+wheel_y = 280
+wheels = []
+wheel_angles = []
+wheel_rotation_speed = 0.05
+conveyor_line_offset = 0.0
 
 def get_theme_colors():
     if dark_mode:
@@ -100,6 +124,11 @@ def add_ball(space):
     shape.collision_type = 0x6  # liquid
     space.add(body, shape)
     return shape
+
+def draw_polygon(screen, shape, scale=1.0, color=THECOLORS['black']):
+    vertices = shape.get_vertices()
+    points = [to_pygame(v.rotated(shape.body.angle) + shape.body.position, scale) for v in vertices]
+    pygame.draw.polygon(screen, color, points)
 
 def draw_ball(screen, ball, scale=1.0, color=THECOLORS['blue']):
     p = to_pygame(ball.body.position, scale)
@@ -156,6 +185,130 @@ def add_polygon(space, pos, size, collision_type):
     space.add(body, shape)  
     return shape
 
+def add_nozzle(screen, scale):
+
+    # Draw the grey area around nozzle
+    nozzle_rect_color = (232, 232, 232) if not dark_mode else (50, 50, 80)
+    rect_x = int((nozzle_center_x - nozzle_width - extra_width / 2) * scale)
+    rect_y = int((600 - nozzle_top_y - nozzle_height - extra_height_top) * scale)
+    rect_width = int((nozzle_width * 2 + extra_width) * scale)
+    rect_height = int((nozzle_height + extra_height_top + (nozzle_top_y - 280) + extra_height_bottom) * scale)
+    pygame.draw.rect(
+        screen,
+        nozzle_rect_color,
+        pygame.Rect(rect_x, rect_y, rect_width, rect_height),
+        border_radius=0,
+        border_top_left_radius=int(48 * scale),
+        border_top_right_radius=int(48 * scale)
+    )
+
+    # Draw triangle
+    triangle_base_x = (nozzle_center_x + 1) * scale
+    triangle_base_y = (610 - nozzle_top_y) * scale
+    triangle_width = 15 * scale
+    triangle_height = 11 * scale
+    triangle_points = [
+        (triangle_base_x, triangle_base_y + triangle_height),
+        (triangle_base_x - triangle_width / 2, triangle_base_y),
+        (triangle_base_x + triangle_width / 2, triangle_base_y)
+    ]
+    triangle_color = colors["polygon"]
+    pygame.draw.polygon(screen, triangle_color, triangle_points)
+
+    rect_color = (0, 0, 0)
+    rect_x = (nozzle_center_x - 35) * scale
+    rect_y = (598 - nozzle_top_y) * scale
+    rect_width = 30 * scale
+    rect_height = 7 * scale
+    pygame.draw.rect(screen, rect_color, pygame.Rect(rect_x, rect_y, rect_width, rect_height))
+
+    rect_x2 = (nozzle_center_x - 30.2) * scale
+    rect_y2 = (601 - nozzle_top_y) * scale
+    rect_width2 = 7 * scale
+    rect_height2 = 7 * scale
+    pygame.draw.rect(screen, rect_color, pygame.Rect(rect_x2, rect_y2, rect_width2, rect_height2))
+
+def add_laser(screen, scale):
+    screen_x = int(sensor_x * scale)
+    screen_y = int(sensor_y * scale)
+    line_height = int(111 * scale) 
+    line_width = max(1, int(0.5 * scale)) 
+
+    line_rect = pygame.Rect(
+        screen_x - line_width // 2,
+        screen_y - line_height // 2,
+        line_width,
+        line_height
+    )
+    pygame.draw.rect(screen, colors["sensor"], line_rect)
+
+    ball_color = (255, 0, 0)
+    ball_radius = 3 * scale
+    ball_center_x = (nozzle_center_x - 32) * scale + 25 * scale + ball_radius + -23 * scale
+    ball_center_y = (598 - nozzle_top_y + 6) * scale + 7 * scale / 2
+    pygame.draw.circle(screen, ball_color, (int(ball_center_x), int(ball_center_y)), int(ball_radius))
+
+def add_conveyor(screen, space, window_width, scale, motor_state):
+
+    global wheel_angles
+    global conveyor_line_offset
+
+    conveyor_width = window_width / scale
+    conveyor = add_polygon(space, (conveyor_width / 2, 300), (conveyor_width, 20), 0x7)
+    draw_polygon(screen, conveyor, scale, color=colors["polygon"])
+
+    line_color = colors["line"]
+    line_width = max(1, int(3 * scale))
+    line_height = int(8 * scale)
+    conveyor_rect_bottom_y = (600 - 300 + 4) * scale
+    conveyor_width = conveyor.bb.right - conveyor.bb.left
+
+    line_scroll_speed = speed if motor_state == 1 else 0.0
+    conveyor_line_offset += line_scroll_speed
+    spacing_px = 70
+    if conveyor_line_offset >= spacing_px:
+        conveyor_line_offset -= spacing_px
+
+    num_lines = int(conveyor_width / spacing_px) + 2
+    for i in range(num_lines):
+        x = conveyor.bb.left + (i * spacing_px) + conveyor_line_offset 
+        screen_x = int(x * scale) 
+        screen_y_start = int(conveyor_rect_bottom_y - line_height) 
+
+        pygame.draw.line(
+            screen,
+            line_color,
+            (screen_x, screen_y_start),
+            (screen_x, screen_y_start + line_height),
+            line_width
+        )
+
+
+    for idx, wheel in enumerate(wheels):
+        center = to_pygame(wheel.body.position, scale)
+        radius = int(wheel.radius * scale)
+
+        if motor_state == 1:
+            wheel_angles[idx] += wheel_rotation_speed
+
+        border_color = THECOLORS["gray"] if dark_mode else THECOLORS["white"]
+        pygame.draw.circle(screen, border_color, center, radius + 2)
+
+        pygame.draw.circle(screen, THECOLORS["black"], center, radius)
+
+        for s in range(6):
+            angle = wheel_angles[idx] + (2 * math.pi * s / 6)
+            end_x = center[0] + radius * 0.7 * math.cos(angle)
+            end_y = center[1] + radius * 0.7 * math.sin(angle)
+            pygame.draw.line(screen, THECOLORS["gray70"], center, (int(end_x), int(end_y)), 2)
+
+        pygame.draw.circle(screen, THECOLORS["black"], center, radius, 2)
+
+    # Draw wheels
+    update_wheels(space, wheels, window_width, wheel_y, wheel_radius)
+    if len(wheel_angles) != len(wheels):
+        wheel_angles = [0.0 for _ in wheels]
+
 def run_servers():
     def start_server(obj):
         obj.start()
@@ -182,6 +335,15 @@ def is_sensor_touching_bottle(sensor_x, sensor_y, sensor_radius, bottles):
                 return True
 
     return False
+
+def add_level_sensor(screen, scale):
+    rect_color = (0, 0, 0)
+    rect_x = (level_sensor_x) * scale
+    rect_y = (level_sensor_y) * scale
+    rect_width = level_sensor_width * scale
+    rect_height = level_sensor_height * scale
+    level_sensor = pygame.Rect(rect_x, rect_y, rect_width, rect_height)
+    pygame.draw.rect(screen, rect_color, level_sensor)
 
 def update_wheels(space, wheels, window_width, wheel_y, wheel_radius):
     spacing = 137.5
@@ -218,67 +380,40 @@ def update_wheels(space, wheels, window_width, wheel_y, wheel_radius):
 
 def runWorld():
 
-    global dark_mode
-
+    # Setup pygame and pymunk
     pygame.init()
-
     screen = pygame.display.set_mode((WORLD_SCREEN_WIDTH, WORLD_SCREEN_HEIGHT), pygame.RESIZABLE)
     pygame.display.set_caption("VirtuaPlant - Bottle Filling Simulation")
     icone = pygame.image.load("assets/github_icon.png")
     pygame.display.set_icon(icone)
     clock = pygame.time.Clock()
-
     space = pymunk.Space()
     space.gravity = (0.0, -900.0)
 
-    wheel_radius = 17
-    wheel_y = 280
-    wheels = []
-
-    base_shape = None
-    wheel_angles = []
-    wheel_rotation_speed = 0.05
-
-    nozzle_rect_color = (232, 232, 232) if not dark_mode else (50, 50, 80)
-
-    nozzle_center_x = 180
-    nozzle_top_y = 450
-    nozzle_width = 15
-    nozzle_height = 20
-
-    level_sensor_x = 197
-    level_sensor_y = 230
-    level_sensor_width = 5
-    level_sensor_height = 5
-
-    extra_width = 60
-    extra_height_top = 20 
-    extra_height_bottom = -10  
+    # Init constants
+    conveyor = None
 
     nozzle_actuator = add_polygon(space, (181, 450), (15, 20), 0x9)
     bottles.append(add_bottle(space))
     balls = []
 
-    sensor_body = pymunk.Body(body_type=pymunk.Body.STATIC)
-    sensor_body.position = (WORLD_SCREEN_WIDTH // 3.7, 600 - WORLD_SCREEN_HEIGHT // 1.68)
-
     running = True
     bottle_sensor_triggered = False
 
+    tag_motor = 0
+
+    #Add pygame events to reduce CPU usage and network trafic
     MODBUS_EVENT = pygame.event.custom_type() 
     RESIZE_EVENT = pygame.event.custom_type() 
     pygame.event.set_allowed([QUIT, KEYDOWN, K_ESCAPE, MODBUS_EVENT, RESIZE_EVENT])
-
-    pygame.time.set_timer(pygame.event.Event(MODBUS_EVENT), 1, 1)
     pygame.time.set_timer(pygame.event.Event(RESIZE_EVENT), 1, 1)
-
-    colors = get_theme_colors()
-    triangle_color = colors["polygon"]
+    pygame.time.set_timer(pygame.event.Event(MODBUS_EVENT), 2, 1)
 
     while running:
 
         clock.tick(FPS)
 
+        #Handle events
         for event in pygame.event.get():
             if event.type == QUIT or (event.type == KEYDOWN and event.key == K_ESCAPE):
                 running = False
@@ -293,14 +428,12 @@ def runWorld():
                 fontBig = pygame.font.SysFont(None, int(40 * scale))
                 fontMedium = pygame.font.SysFont(None, int(26 * scale))
 
-                sensor_x = WORLD_SCREEN_WIDTH // 3.58
-                sensor_y = WORLD_SCREEN_HEIGHT // 1.66
-                sensor_radius = 1.5
-
-                pygame.time.set_timer(pygame.event.Event(RESIZE_EVENT), 1000, 1)
+                sensor_radius = 5
 
                 point = pygame.mouse.get_pos()
-                log.debug(point)
+                log.info(point)
+
+                pygame.time.set_timer(pygame.event.Event(RESIZE_EVENT), 1000, 1)
 
             #Update Modbus registers
             if event.type == MODBUS_EVENT:
@@ -348,17 +481,21 @@ def runWorld():
 
                 pygame.time.set_timer(pygame.event.Event(MODBUS_EVENT), 100, 1)
 
-        update_wheels(space, wheels, window_width, wheel_y, wheel_radius)
-        if len(wheel_angles) != len(wheels):
-            wheel_angles = [0.0 for _ in wheels]
-
-        if base_shape:
-            space.remove(base_shape, base_shape.body)
-        base_width = window_width / scale
-        base_shape = add_polygon(space, (base_width / 2, 300), (base_width, 20), 0x7)
-
+        # Clear screen and add fix elements
         screen.fill(colors["bg"])
+        add_nozzle(screen, scale)
+        add_level_sensor(screen, scale)
+        draw_polygon(screen, nozzle_actuator, scale, color=colors["polygon"])
 
+        # Add title and text
+        screen.blit(fontMedium.render("Bottle-filling factory", 1, colors["title"]), (int(10 * scale), int(10 * scale)))
+        title_y = int(10 * scale)
+        virtua_y = title_y + fontMedium.get_height() + int(4 * scale)
+        screen.blit(fontBig.render("VirtuaPlant", 1, colors["text"]), (int(10 * scale), virtua_y))
+        quit_text = fontMedium.render("(press Esc to quit)", True, colors["text"])
+        screen.blit(quit_text, (window_width - quit_text.get_width() - int(10 * scale), int(10 * scale)))
+
+        # Handle world inputs
         if nozzle_state == 1 :
             if bottles:
                 balls.append((add_ball(space), bottles[-1][0].body))
@@ -367,7 +504,7 @@ def runWorld():
 
         if motor_state == 1:
             for bottle in bottles:
-                bottle[0].body.position = (bottle[0].body.position.x + 0.25, bottle[0].body.position.y)
+                bottle[0].body.position = (bottle[0].body.position.x + speed, bottle[0].body.position.y)
 
         if tag_run == 1:
             if not bottles or (bottles[-1][0].body.position.x > 130 + BOTTLE_SPACING):
@@ -375,83 +512,14 @@ def runWorld():
                 new_bottle[0].body.position = pymunk.Vec2d(130, 300)
                 bottles.append(new_bottle)
 
-        rect_x = int((nozzle_center_x - nozzle_width - extra_width / 2) * scale)
-        rect_y = int((600 - nozzle_top_y - nozzle_height - extra_height_top) * scale)
-        rect_width = int((nozzle_width * 2 + extra_width) * scale)
-        rect_height = int((nozzle_height + extra_height_top + (nozzle_top_y - 280) + extra_height_bottom) * scale)
-
-        pygame.draw.rect(
-            screen,
-            nozzle_rect_color,
-            pygame.Rect(rect_x, rect_y, rect_width, rect_height),
-            border_radius=0,
-            border_top_left_radius=int(48 * scale),
-            border_top_right_radius=int(48 * scale)
-        )
-
-        # TRIANGLE OF THE NOZZLE
-        triangle_base_x = (nozzle_center_x + 1) * scale
-        triangle_base_y = (610 - nozzle_top_y) * scale
-
-        triangle_width = 15 * scale
-        triangle_height = 11 * scale
-
-        triangle_points = [
-            (triangle_base_x, triangle_base_y + triangle_height),
-            (triangle_base_x - triangle_width / 2, triangle_base_y),
-            (triangle_base_x + triangle_width / 2, triangle_base_y)
-        ]
-
-        pygame.draw.polygon(screen, triangle_color, triangle_points)
-
+        # Add laser if needed
         if not bottle_sensor_triggered:
-            screen_x = int(sensor_x * scale)
-            screen_y = int(sensor_y * scale)
-            line_height = int(111 * scale) 
-            line_width = max(1, int(0.5 * scale)) 
+            add_laser(screen, scale)
 
-            line_rect = pygame.Rect(
-                screen_x - line_width // 2,
-                screen_y - line_height // 2,
-                line_width,
-                line_height
-            )
-            pygame.draw.rect(screen, colors["sensor"], line_rect)
+        # Draw conveyor 
+        add_conveyor(screen, space, window_width, scale, tag_motor)
 
-            ball_color = (255, 0, 0)
-            ball_radius = 3 * scale
-            ball_center_x = (nozzle_center_x - 32) * scale + 25 * scale + ball_radius + -23 * scale
-            ball_center_y = (598 - nozzle_top_y + 6) * scale + 7 * scale / 2
-            pygame.draw.circle(screen, ball_color, (int(ball_center_x), int(ball_center_y)), int(ball_radius))
-
-        # RECTANGLE OF "BASE_SHAPE"
-        rect_color = (0, 0, 0)
-
-        rect_x = (nozzle_center_x - 35) * scale
-        rect_y = (598 - nozzle_top_y) * scale
-
-        rect_width = 30 * scale
-        rect_height = 7 * scale
-
-        pygame.draw.rect(screen, rect_color, pygame.Rect(rect_x, rect_y, rect_width, rect_height))
-
-        # RECTANGLE OF "BASE_SHAPE"
-        rect_color2 = (0, 0, 0)
-        rect_x2 = (nozzle_center_x - 30.2) * scale
-        rect_y2 = (601 - nozzle_top_y) * scale
-        rect_width2 = 7 * scale
-        rect_height2 = 7 * scale
-        pygame.draw.rect(screen, rect_color2, pygame.Rect(rect_x2, rect_y2, rect_width2, rect_height2))
-
-        #Draw level sensor
-        rect_color = (0, 0, 0)
-        rect_x = (level_sensor_x) * scale
-        rect_y = (level_sensor_y) * scale
-        rect_width = level_sensor_width * scale
-        rect_height = level_sensor_height * scale
-        level_sensor = pygame.Rect(rect_x, rect_y, rect_width, rect_height)
-        pygame.draw.rect(screen, rect_color, level_sensor)
-
+        # Handle balls
         flag_sensor_level=False
         for ball_data in balls[:]:
             ball, _ = ball_data
@@ -473,6 +541,7 @@ def runWorld():
         if ( flag_sensor_level == False ):
             plc['level'].write(0, 0)
 
+        # Add/remove bottles from world
         for bottle in bottles[:]:
             pos_x = bottle[0].body.position.x
             screen_pos_x = pos_x * scale
@@ -489,93 +558,24 @@ def runWorld():
             else:
                 draw_lines(screen, bottle, scale, color=colors["line"])
 
-        draw_polygon(screen, base_shape, scale, color=colors["polygon"])
-
-        # VERTICALE LINE OF "BUSE_SHAPE"
-
-        line_color = (179, 179, 179)
-        line_width = max(1, int(3 * scale))
-        line_height = int(8 * scale)
-        base_rect_bottom_y = (600 - 300 + 4) * scale
-
-        base_width = base_shape.bb.right - base_shape.bb.left
-
-        line_scroll_speed = 0.26 if plc['motor'].read(0) == 1 else 0.0
-        if not hasattr(runWorld, "line_offset"):
-            runWorld.line_offset = 0
-        runWorld.line_offset += line_scroll_speed
-        spacing_px = 70
-        if runWorld.line_offset >= spacing_px:
-            runWorld.line_offset -= spacing_px
-
-        line_color = (179, 179, 179)
-        line_width = max(1, int(3 * scale))
-        line_height = int(8 * scale)
-        base_rect_bottom_y = (600 - 300 + 4) * scale
-
-        num_lines = int(base_width / spacing_px) + 2
-        for i in range(num_lines):
-            x = base_shape.bb.left + (i * spacing_px) + runWorld.line_offset 
-            screen_x = int(x * scale) 
-            screen_y_start = int(base_rect_bottom_y - line_height) 
-
-            pygame.draw.line(
-                screen,
-                line_color,
-                (screen_x, screen_y_start),
-                (screen_x, screen_y_start + line_height),
-                line_width
-            )
-
-        for idx, wheel in enumerate(wheels):
-            center = to_pygame(wheel.body.position, scale)
-            radius = int(wheel.radius * scale)
-
-            if tag_motor == 1:
-                wheel_angles[idx] += wheel_rotation_speed
-
-            border_color = THECOLORS["gray"] if dark_mode else THECOLORS["white"]
-            pygame.draw.circle(screen, border_color, center, radius + 2)
-
-            pygame.draw.circle(screen, THECOLORS["black"], center, radius)
-
-            for s in range(6):
-                angle = wheel_angles[idx] + (2 * math.pi * s / 6)
-                end_x = center[0] + radius * 0.7 * math.cos(angle)
-                end_y = center[1] + radius * 0.7 * math.sin(angle)
-                pygame.draw.line(screen, THECOLORS["gray70"], center, (int(end_x), int(end_y)), 2)
-
-            pygame.draw.circle(screen, THECOLORS["black"], center, radius, 2)
-
-        draw_polygon(screen, nozzle_actuator, scale, color=colors["polygon"])
-
-        screen.blit(fontMedium.render("Bottle-filling factory", 1, colors["title"]), (int(10 * scale), int(10 * scale)))
-        title_y = int(10 * scale)
-        virtua_y = title_y + fontMedium.get_height() + int(4 * scale)
-        screen.blit(fontBig.render("VirtuaPlant", 1, colors["text"]), (int(10 * scale), virtua_y))
-
-        quit_text = fontMedium.render("(press Esc to quit)", True, colors["text"])
-        screen.blit(quit_text, (window_width - quit_text.get_width() - int(10 * scale), int(10 * scale)))
-
         space.step(1 / FPS)
         pygame.display.flip()
 
-def draw_polygon(screen, shape, scale=1.0, color=THECOLORS['black']):
-    vertices = shape.get_vertices()
-    points = [to_pygame(v.rotated(shape.body.angle) + shape.body.position, scale) for v in vertices]
-    pygame.draw.polygon(screen, color, points)
-
 # Help
 def help():
-    print (sys.argv[0], '[options] -i <IP> -p <port>')
+    print (sys.argv[0], '[-h] [-d] [-D] [-s <integer>] -i <IP> -p <port>')
     print ("    \t-i Modbus server IP")
     print ("    \t-p Modbus server port")
-    print ("Options :")
+    print ("    \t-s Speed")
     print ("    \t-h print this help then exit")
     print ("    \t-d debug")
+    print ("    \t-D dark mode")
 
 def main():
     global plc, motor, nozzle, level, contact
+    global dark_mode
+    global colors 
+    global speed
 
     # Default values
     log.setLevel(logging.INFO)
@@ -584,7 +584,7 @@ def main():
 
     # Get options
     try:
-        opts, args = getopt.getopt(sys.argv[1:],"hdi:p:")
+        opts, args = getopt.getopt(sys.argv[1:],"hdDis:p:")
     except getopt.GetoptError as err:
         print(err)  
         help()
@@ -596,11 +596,17 @@ def main():
             sys.exit(0)
         elif opt in ("-i"):
             ip = arg
+        elif opt in ("-s"):
+            speed = speed * int(arg)
         elif opt in ("-p"):
             port = int(arg)
             clearAllSlots = 1
         elif opt in ("-d"):
             log.setLevel(logging.DEBUG)
+        elif opt in ("-D"):
+            dark_mode = True
+
+    colors = get_theme_colors()
 
     base_port = port
     ports = {
