@@ -26,41 +26,15 @@ log = logging.getLogger()
 
 # PLC addresses
 PLC_SERVER_IP = "localhost"
-PLC_RW_ADDR = 0x0
-PLC_RO_ADDR = 0x3E8
 PLC_TAG_RUN = 0x0
 PLC_TAG_LEVEL = 0x1
 PLC_TAG_CONTACT = 0x2
 PLC_TAG_MOTOR = 0x3
 PLC_TAG_NOZZLE = 0x4
 
-# MOTOR actuator
-MOTOR_RW_ADDR = 0x0
-MOTOR_TAG_RUN = 0x0
-
-# NOZZLE actuator
-NOZZLE_RW_ADDR = 0x0
-NOZZLE_TAG_RUN = 0x0
-
-# LEVEL sensor
-LEVEL_RO_ADDR = 0x0
-LEVEL_TAG_SENSOR = 0x0
-
-# CONTACT sensor
-CONTACT_RO_ADDR = 0x0
-CONTACT_TAG_SENSOR = 0x0
-
-# Globals
-plc = {}
-motor = {}
-nozzle = {}
-level = {}
-contact = {}
-bottles = []
-
 WORLD_SCREEN_WIDTH = 550
 WORLD_SCREEN_HEIGHT = 350
-FPS = 60.0
+FPS = 30.0
 
 NEXT_BOTTLE_DISTANCE = 100
 BOTTLE_SPACING = 60 
@@ -75,11 +49,12 @@ extra_height_bottom = -10
 
 level_sensor_x = 160
 level_sensor_y = 222
-level_sensor_width = 5
-level_sensor_height = 5
+level_sensor_width = 10
+level_sensor_height = 10
 
 sensor_x = WORLD_SCREEN_WIDTH // 3.58
 sensor_y = WORLD_SCREEN_HEIGHT // 1.66
+sensor_radius = 5
 
 wheel_radius = 17
 wheel_y = 280
@@ -87,6 +62,10 @@ wheels = []
 wheel_angles = []
 wheel_rotation_speed = 0.05
 conveyor_line_offset = 0.0
+conveyor = None
+
+# Globals
+bottles = []
 
 def get_theme_colors():
     if dark_mode:
@@ -115,7 +94,7 @@ def to_pygame(p, scale=1.0):
 
 def add_ball(space):
     mass = 0.01
-    radius = 3
+    radius = 5
     inertia = pymunk.moment_for_circle(mass, 0, radius, (0, 0))
     x = random.randint(181, 182)
     body = pymunk.Body(mass, inertia)
@@ -132,7 +111,7 @@ def draw_polygon(screen, shape, scale=1.0, color=THECOLORS['black']):
 
 def draw_ball(screen, ball, scale=1.0, color=THECOLORS['blue']):
     p = to_pygame(ball.body.position, scale)
-    pygame.draw.circle(screen, color, p, max(1, int(ball.radius * scale)), 2)
+    pygame.draw.circle(screen, color, p, max(1, int(ball.radius * scale)), 0)
 
 def add_bottle(space):
     mass = 10
@@ -252,9 +231,8 @@ def add_conveyor(screen, space, window_width, scale, motor_state):
 
     global wheel_angles
     global conveyor_line_offset
+    global conveyor
 
-    conveyor_width = window_width / scale
-    conveyor = add_polygon(space, (conveyor_width / 2, 300), (conveyor_width, 20), 0x7)
     draw_polygon(screen, conveyor, scale, color=colors["polygon"])
 
     line_color = colors["line"]
@@ -263,7 +241,7 @@ def add_conveyor(screen, space, window_width, scale, motor_state):
     conveyor_rect_bottom_y = (600 - 300 + 4) * scale
     conveyor_width = conveyor.bb.right - conveyor.bb.left
 
-    line_scroll_speed = speed if motor_state == 1 else 0.0
+    line_scroll_speed = speed if motor_state else 0.0
     conveyor_line_offset += line_scroll_speed
     spacing_px = 70
     if conveyor_line_offset >= spacing_px:
@@ -288,7 +266,7 @@ def add_conveyor(screen, space, window_width, scale, motor_state):
         center = to_pygame(wheel.body.position, scale)
         radius = int(wheel.radius * scale)
 
-        if motor_state == 1:
+        if plc.motor:
             wheel_angles[idx] += wheel_rotation_speed
 
         border_color = THECOLORS["gray"] if dark_mode else THECOLORS["white"]
@@ -313,8 +291,7 @@ def run_servers():
     def start_server(obj):
         obj.start()
 
-    for server in [plc['server'], motor['server'], nozzle['server'], level['server'], contact['server']]:
-        threading.Thread(target=start_server, args=(server,), daemon=True).start()
+    threading.Thread(target=start_server, args=(plc,), daemon=True).start()
 
 def is_sensor_touching_bottle(sensor_x, sensor_y, sensor_radius, bottles):
     for bottle in bottles:
@@ -380,6 +357,8 @@ def update_wheels(space, wheels, window_width, wheel_y, wheel_radius):
 
 def runWorld():
 
+    global conveyor
+
     # Setup pygame and pymunk
     pygame.init()
     screen = pygame.display.set_mode((WORLD_SCREEN_WIDTH, WORLD_SCREEN_HEIGHT), pygame.RESIZABLE)
@@ -390,17 +369,12 @@ def runWorld():
     space = pymunk.Space()
     space.gravity = (0.0, -900.0)
 
-    # Init constants
-    conveyor = None
-
     nozzle_actuator = add_polygon(space, (181, 450), (15, 20), 0x9)
     bottles.append(add_bottle(space))
     balls = []
 
     running = True
-    bottle_sensor_triggered = False
-
-    tag_motor = 0
+    scale = 1.0
 
     #Add pygame events to reduce CPU usage and network trafic
     MODBUS_EVENT = pygame.event.custom_type() 
@@ -419,6 +393,7 @@ def runWorld():
                 running = False
 
             #Update screen size
+            previous_scale = scale
             if event.type == RESIZE_EVENT:
                 window_width, window_height = screen.get_size()
                 scale_x = window_width / WORLD_SCREEN_WIDTH
@@ -428,56 +403,41 @@ def runWorld():
                 fontBig = pygame.font.SysFont(None, int(40 * scale))
                 fontMedium = pygame.font.SysFont(None, int(26 * scale))
 
-                sensor_radius = 5
+                conveyor_width = window_width / scale
+                if ( conveyor == None ):
+                    conveyor = add_polygon(space, (conveyor_width / 2, 300), (conveyor_width, 20), 0x7)
+                if (scale != previous_scale):
+                    space.remove(conveyor)
+                    conveyor = add_polygon(space, (conveyor_width / 2, 300), (conveyor_width, 20), 0x7)
 
+                #Debug
                 point = pygame.mouse.get_pos()
                 log.info(point)
+                log.info("balls:" + str(len(balls)) + "bottles:" + str(len(bottles)))
 
                 pygame.time.set_timer(pygame.event.Event(RESIZE_EVENT), 1000, 1)
 
             #Update Modbus registers
             if event.type == MODBUS_EVENT:
-                # Manage plc
-                # Read remote/local variables
-                tag_level   = plc['level'].read(LEVEL_RO_ADDR + LEVEL_TAG_SENSOR)
-                tag_contact = plc['contact'].read(CONTACT_RO_ADDR + CONTACT_TAG_SENSOR)
-                tag_run     = 1
-                #FIXME tag_run     = plc['server'].read(PLC_RW_ADDR + PLC_TAG_RUN) 
-
                 # Manage PLC programm
                 # Motor Logic
-                if (tag_run == 1) and ((tag_contact == 0) or (tag_level == 1)):
-                    tag_motor = 1
+                if (plc.run == 1) and ((plc.contact == 0) or (plc.level_sensor == 1)):
+                    plc.setMotor(1)
                 else:
-                    tag_motor = 0
+                    plc.setMotor(0)
 
                 # Nozzle Logic 
-                if (tag_run == 1) and ((tag_contact == 1) and (tag_level == 0)):
-                    tag_nozzle = 1
+                if (plc.run == 1) and ((plc.contact == 1) and (plc.level_sensor == 0)):
+                    plc.setNozzle(1)
                 else:
-                    tag_nozzle = 0
+                    plc.setNozzle(0)
 
-                log.info ("level=" + str(tag_level) + " ,contact=" + str(tag_contact) + ", nozzle=" + str(tag_nozzle) + "motor=" + str(tag_motor))
-
-                # Write remote/local variables
-                plc['motor'].write(MOTOR_RW_ADDR + MOTOR_TAG_RUN, tag_motor)
-                plc['nozzle'].write(NOZZLE_RW_ADDR + NOZZLE_TAG_RUN, tag_nozzle)
-
-                plc['server'].write(PLC_RO_ADDR + PLC_TAG_LEVEL, tag_level)
-                plc['server'].write(PLC_RO_ADDR + PLC_TAG_CONTACT, tag_contact)
-                plc['server'].write(PLC_RO_ADDR + PLC_TAG_MOTOR, tag_motor)
-                plc['server'].write(PLC_RO_ADDR + PLC_TAG_NOZZLE, tag_nozzle)
-
-                nozzle_state = nozzle['server'].read(NOZZLE_RW_ADDR + NOZZLE_TAG_RUN)
-                motor_state = motor['server'].read(MOTOR_RW_ADDR + MOTOR_TAG_RUN)
+                log.info ("level=" + str(plc.level_sensor) + " ,contact=" + str(plc.contact) + ", nozzle=" + str(plc.nozzle) + "motor=" + str(plc.motor) + "run=" + str(plc.run))
 
                 if is_sensor_touching_bottle(sensor_x, sensor_y, sensor_radius, bottles):
-                    bottle_sensor_triggered = True
-                    plc['contact'].write(0, 1)
-                    plc['nozzle'].write(0, 1)
+                    plc.setContact(1)
                 else:
-                    plc['contact'].write(0, 0)
-                    bottle_sensor_triggered = False
+                    plc.setContact(0)
 
                 pygame.time.set_timer(pygame.event.Event(MODBUS_EVENT), 100, 1)
 
@@ -496,28 +456,28 @@ def runWorld():
         screen.blit(quit_text, (window_width - quit_text.get_width() - int(10 * scale), int(10 * scale)))
 
         # Handle world inputs
-        if nozzle_state == 1 :
+        if plc.nozzle:
             if bottles:
                 balls.append((add_ball(space), bottles[-1][0].body))
             else:
                 balls.append((add_ball(space), None))
 
-        if motor_state == 1:
+        if plc.motor:
             for bottle in bottles:
                 bottle[0].body.position = (bottle[0].body.position.x + speed, bottle[0].body.position.y)
 
-        if tag_run == 1:
+        if plc.run:
             if not bottles or (bottles[-1][0].body.position.x > 130 + BOTTLE_SPACING):
                 new_bottle = add_bottle(space)
                 new_bottle[0].body.position = pymunk.Vec2d(130, 300)
                 bottles.append(new_bottle)
 
         # Add laser if needed
-        if not bottle_sensor_triggered:
+        if not plc.contact:
             add_laser(screen, scale)
 
         # Draw conveyor 
-        add_conveyor(screen, space, window_width, scale, tag_motor)
+        add_conveyor(screen, space, window_width, scale, plc.motor)
 
         # Handle balls
         flag_sensor_level=False
@@ -527,10 +487,10 @@ def runWorld():
             # Detect collision with level sensor
             x,y = to_pygame(ball.body.position, scale)
             if (( int(y) > level_sensor_y and int(y) < level_sensor_y + level_sensor_height ) and ( int(x) > level_sensor_x and int(x) < level_sensor_x + level_sensor_width )):
-                log.info("Sensor level triggered")
-                plc['nozzle'].write(0, 0)
-                plc['level'].write(0, 1)
-                flag_sensor_level=True
+                if ( plc.contact ):
+                    log.info("Sensor level triggered")
+                    plc.setLevelSensor(1)
+                    flag_sensor_level=True
 
             if ball.body.position.y < 0 or ball.body.position.x > WORLD_SCREEN_WIDTH + 1500:
                 space.remove(ball, ball.body)
@@ -539,7 +499,7 @@ def runWorld():
                 draw_ball(screen, ball, scale, color=colors["ball"])
 
         if ( flag_sensor_level == False ):
-            plc['level'].write(0, 0)
+            plc.setLevelSensor(0)
 
         # Add/remove bottles from world
         for bottle in bottles[:]:
@@ -572,7 +532,7 @@ def help():
     print ("    \t-D dark mode")
 
 def main():
-    global plc, motor, nozzle, level, contact
+    global plc
     global dark_mode
     global colors 
     global speed
@@ -608,33 +568,14 @@ def main():
 
     colors = get_theme_colors()
 
-    base_port = port
-    ports = {
-        "plc": base_port,
-        "motor": base_port + 1,
-        "nozzle": base_port + 2,
-        "level": base_port + 3,
-        "contact": base_port + 4
-    }
-
-    # Initialise motor, nozzle, level and contact components
-    motor['server'] = Server(ip, port=ports["motor"])
-    nozzle['server'] = Server(ip, port=ports["nozzle"])
-    level['server'] = Server(ip, port=ports["level"])
-    contact['server'] = Server(ip, port=ports["contact"])
-
     # Initialise plc component
-    plc['server'] = Server(ip, port=ports["plc"])
+    plc = Server(ip, port)
     run_servers()  
     log.info("Modbus server started")
 
-    plc['motor'] = Client(ip, port=ports["motor"])
-    plc['nozzle'] = Client(ip, port=ports["nozzle"])
-    plc['level'] = Client(ip, port=ports["level"])
-    plc['contact'] = Client(ip, port=ports["contact"])
-
     # Run World
     runWorld()    
+    pygame.quit()
 
 if __name__ == "__main__":
     main()
