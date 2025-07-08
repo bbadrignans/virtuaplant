@@ -44,7 +44,7 @@ The following packages are required:
 
 On debian-based systems (like Ubuntu) you can apt-get the packages which are not provided over pip:
 
-    apt-get install python-pygame python-gobject python-pip python-dev libcairo2-dev
+    apt install python3 libcairo2-dev libgirepository1.0-dev pkg-config python3-dev gir1.2-glib-2.0 cmake python3-tk
 
 Then install the pip ones:
 
