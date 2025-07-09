@@ -9,7 +9,7 @@ import time
 import json
 import argparse
 
-from world import PLC_TAG_CONTACT, PLC_TAG_LEVEL, PLC_TAG_MOTOR, PLC_TAG_NOZZLE, PLC_TAG_RUN
+from modbus import REG_CONTACT, REG_LEVEL, REG_MOTOR, REG_NOZZLE, REG_RUN
 
 # Constants
 HMI_SCREEN_WIDTH = 20
@@ -24,12 +24,9 @@ class HMIWindow:
         self.nozzleStatusValue.config(text="N/A", fg="gray33")
         self.connectionStatusValue.config(text="OFFLINE", fg="red")
 
-    def __init__(self, address, base_port):
-        ports = {
-            "plc": base_port
-        }
+    def __init__(self, address, port):
 
-        self.client = Client(address, port=ports["plc"])
+        self.client = Client(address, port)
         self.client.connect()
 
         self.window = tk.Tk()
@@ -86,41 +83,38 @@ class HMIWindow:
     def setProcess(self, data=None):
         try:
             print("click")
-            self.client.read(0x0)
             self.client.write(0x0, data)
         except:
             pass
 
     def update_status(self):
         try:
-#           regs = self.client.readln(PLC_RO_ADDR, 17)
+            regs = self.client.readln(0, 17)
 
-#           self.bottlePositionValue.config(
-#               text="YES" if regs[PLC_TAG_CONTACT] == 1 else "NO",
-#               fg="green" if regs[PLC_TAG_CONTACT] == 1 else "red"
-#           )
+            self.bottlePositionValue.config(
+                text="YES" if regs[REG_CONTACT] == 1 else "NO",
+                fg="green" if regs[REG_CONTACT] == 1 else "red"
+            )
 
-#           self.levelHitValue.config(
-#               text="YES" if regs[PLC_TAG_LEVEL] == 1 else "NO",
-#               fg="green" if regs[PLC_TAG_LEVEL] == 1 else "red"
-#           )
+            self.levelHitValue.config(
+                text="YES" if regs[REG_CONTACT] == 1 else "NO",
+                fg="green" if regs[REG_CONTACT] == 1 else "red"
+            )
 
-#           self.motorStatusValue.config(
-#               text="ON" if regs[PLC_TAG_MOTOR] == 1 else "OFF",
-#               fg="green" if regs[PLC_TAG_MOTOR] == 1 else "red"
-#           )
+            self.motorStatusValue.config(
+                text="ON" if regs[REG_MOTOR] == 1 else "OFF",
+                fg="green" if regs[REG_MOTOR] == 1 else "red"
+            )
 
-#           self.nozzleStatusValue.config(
-#               text="OPEN" if regs[PLC_TAG_NOZZLE] == 1 else "CLOSED",
-#               fg="green" if regs[PLC_TAG_NOZZLE] == 1 else "red"
-#           )
+            self.nozzleStatusValue.config(
+                text="OPEN" if regs[REG_NOZZLE] == 1 else "CLOSED",
+                fg="green" if regs[REG_NOZZLE] == 1 else "red"
+            )
 
-#           regs_rw = self.client.readln(PLC_RW_ADDR, 17)
-
-#           self.processStatusValue.config(
-#               text="RUNNING" if regs_rw[PLC_TAG_RUN] == 1 else "STOPPED",
-#               fg="green" if regs_rw[PLC_TAG_RUN] == 1 else "red"
-#           )
+            self.processStatusValue.config(
+                text="RUNNING" if regs[0] == 1 else "STOPPED",
+                fg="green" if regs[0] == 1 else "red"
+            )
 
             self.connectionStatusValue.config(text="ONLINE", fg="green")
 

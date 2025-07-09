@@ -266,7 +266,7 @@ def add_conveyor(screen, space, window_width, scale, motor_state):
         center = to_pygame(wheel.body.position, scale)
         radius = int(wheel.radius * scale)
 
-        if plc.motor:
+        if motor_state:
             wheel_angles[idx] += wheel_rotation_speed
 
         border_color = THECOLORS["gray"] if dark_mode else THECOLORS["white"]
@@ -355,7 +355,7 @@ def update_wheels(space, wheels, window_width, wheel_y, wheel_radius):
 
         wheels.append(wheel_shape)
 
-def runWorld():
+def runWorld(autorun):
 
     global conveyor
 
@@ -382,6 +382,14 @@ def runWorld():
     pygame.event.set_allowed([QUIT, KEYDOWN, K_ESCAPE, MODBUS_EVENT, RESIZE_EVENT])
     pygame.time.set_timer(pygame.event.Event(RESIZE_EVENT), 1, 1)
     pygame.time.set_timer(pygame.event.Event(MODBUS_EVENT), 2, 1)
+
+    level_sensor = 0
+    contact = 0
+    nozzle = 0
+    motor = 0
+    run = autorun
+
+    plc.setRun(autorun)
 
     while running:
 
@@ -419,20 +427,25 @@ def runWorld():
 
             #Update Modbus registers
             if event.type == MODBUS_EVENT:
+                run = plc.getRun()
+                motor = plc.getMotor()
+                nozzle = plc.getNozzle()
+                contact = plc.getContact()
+                level_sensor = plc.getLevelSensor()
                 # Manage PLC programm
                 # Motor Logic
-                if (plc.run == 1) and ((plc.contact == 0) or (plc.level_sensor == 1)):
+                if (run == 1) and ((contact == 0) or (level_sensor == 1)):
                     plc.setMotor(1)
                 else:
                     plc.setMotor(0)
 
                 # Nozzle Logic 
-                if (plc.run == 1) and ((plc.contact == 1) and (plc.level_sensor == 0)):
+                if (run == 1) and ((contact == 1) and (level_sensor == 0)):
                     plc.setNozzle(1)
                 else:
                     plc.setNozzle(0)
 
-                log.info ("level=" + str(plc.level_sensor) + " ,contact=" + str(plc.contact) + ", nozzle=" + str(plc.nozzle) + "motor=" + str(plc.motor) + "run=" + str(plc.run))
+                log.info ("level=" + str(level_sensor) + " ,contact=" + str(contact) + ", nozzle=" + str(nozzle) + "motor=" + str(motor) + "run=" + str(run))
 
                 if is_sensor_touching_bottle(sensor_x, sensor_y, sensor_radius, bottles):
                     plc.setContact(1)
@@ -456,28 +469,28 @@ def runWorld():
         screen.blit(quit_text, (window_width - quit_text.get_width() - int(10 * scale), int(10 * scale)))
 
         # Handle world inputs
-        if plc.nozzle:
+        if nozzle:
             if bottles:
                 balls.append((add_ball(space), bottles[-1][0].body))
             else:
                 balls.append((add_ball(space), None))
 
-        if plc.motor:
+        if motor:
             for bottle in bottles:
                 bottle[0].body.position = (bottle[0].body.position.x + speed, bottle[0].body.position.y)
 
-        if plc.run:
+        if run:
             if not bottles or (bottles[-1][0].body.position.x > 130 + BOTTLE_SPACING):
                 new_bottle = add_bottle(space)
                 new_bottle[0].body.position = pymunk.Vec2d(130, 300)
                 bottles.append(new_bottle)
 
         # Add laser if needed
-        if not plc.contact:
+        if not contact:
             add_laser(screen, scale)
 
         # Draw conveyor 
-        add_conveyor(screen, space, window_width, scale, plc.motor)
+        add_conveyor(screen, space, window_width, scale, motor)
 
         # Handle balls
         flag_sensor_level=False
@@ -487,7 +500,7 @@ def runWorld():
             # Detect collision with level sensor
             x,y = to_pygame(ball.body.position, scale)
             if (( int(y) > level_sensor_y and int(y) < level_sensor_y + level_sensor_height ) and ( int(x) > level_sensor_x and int(x) < level_sensor_x + level_sensor_width )):
-                if ( plc.contact ):
+                if ( contact ):
                     log.info("Sensor level triggered")
                     plc.setLevelSensor(1)
                     flag_sensor_level=True
@@ -529,6 +542,7 @@ def help():
     print ("    \t-s Speed")
     print ("    \t-h print this help then exit")
     print ("    \t-d debug")
+    print ("    \t-r run at startup")
     print ("    \t-D dark mode")
 
 def main():
@@ -540,11 +554,12 @@ def main():
     # Default values
     log.setLevel(logging.INFO)
     ip="localhost"
+    autorun=0
     port=1502
 
     # Get options
     try:
-        opts, args = getopt.getopt(sys.argv[1:],"hdDis:p:")
+        opts, args = getopt.getopt(sys.argv[1:],"hdDirs:p:")
     except getopt.GetoptError as err:
         print(err)  
         help()
@@ -563,6 +578,8 @@ def main():
             clearAllSlots = 1
         elif opt in ("-d"):
             log.setLevel(logging.DEBUG)
+        elif opt in ("-r"):
+            autorun = 1
         elif opt in ("-D"):
             dark_mode = True
 
@@ -574,7 +591,7 @@ def main():
     log.info("Modbus server started")
 
     # Run World
-    runWorld()    
+    runWorld(autorun)    
     pygame.quit()
 
 if __name__ == "__main__":
