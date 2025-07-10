@@ -17,8 +17,15 @@ from pygame.color import THECOLORS
 import pymunk
 from modbus import ServerModbus as Server, ClientModbus as Client
 
-dark_mode = False
-speed = 0.25
+dark_mode   = False
+show_title  = False
+debug       = False
+
+# Physic world parameters
+speed               = 0.25
+FPS                 = 60.0
+bottle_thickness    = 5
+ball_radius         = 3
 
 # Logging
 logging.basicConfig()
@@ -34,27 +41,26 @@ PLC_TAG_NOZZLE = 0x4
 
 WORLD_SCREEN_WIDTH = 550
 WORLD_SCREEN_HEIGHT = 350
-FPS = 30.0
 
 NEXT_BOTTLE_DISTANCE = 100
-BOTTLE_SPACING = 60 
+BOTTLE_SPACING = 80 + bottle_thickness 
 
 nozzle_center_x = 180
 nozzle_top_y = 450
 nozzle_width = 15
 nozzle_height = 20
+nozzle_throughput = 1
 extra_width = 60
 extra_height_top = 20 
 extra_height_bottom = -10  
 
-level_sensor_x = 160
-level_sensor_y = 222
-level_sensor_width = 10
-level_sensor_height = 10
+level_sensor_x = 172
+level_sensor_y = 220
+level_sensor_size = 20
 
 sensor_x = WORLD_SCREEN_WIDTH // 3.58
 sensor_y = WORLD_SCREEN_HEIGHT // 1.66
-sensor_radius = 5
+sensor_radius = 10
 
 wheel_radius = 17
 wheel_y = 280
@@ -94,11 +100,13 @@ def to_pygame(p, scale=1.0):
 
 def add_ball(space):
     mass = 0.01
-    radius = 5
+    radius = ball_radius
     inertia = pymunk.moment_for_circle(mass, 0, radius, (0, 0))
-    x = random.randint(181, 182)
+    x = random.randint(180, 183)
+
     body = pymunk.Body(mass, inertia)
     body.position = x, 430
+
     shape = pymunk.Circle(body, radius, (0, 0))
     shape.collision_type = 0x6  # liquid
     space.add(body, shape)
@@ -114,23 +122,23 @@ def draw_ball(screen, ball, scale=1.0, color=THECOLORS['blue']):
     pygame.draw.circle(screen, color, p, max(1, int(ball.radius * scale)), 0)
 
 def add_bottle(space):
-    mass = 10
+    mass = 4
     inertia = float("inf")
 
     body = pymunk.Body(mass, inertia)
     body.position = (130, 300)
 
-    l1 = pymunk.Segment(body, (-150, 0), (-100, 0), 4.0)
-    l2 = pymunk.Segment(body, (-150, 0), (-150, 100), 5.5)
-    l3 = pymunk.Segment(body, (-100, 0), (-100, 100), 3.3)
+    l1 = pymunk.Segment(body, (-150, 0), (-100, 0), bottle_thickness)      # bottle_bottom
+    l2 = pymunk.Segment(body, (-150, 0), (-150, 100), bottle_thickness)    # bottle_right_side
+    l3 = pymunk.Segment(body, (-100, 0), (-100, 100), bottle_thickness)    # bottle_left_side
 
-    for l in [l1, l2, l3]:
-        l.friction = 0.94
-        l.elasticity = 0.5
-
-    l1.collision_type = 0x2
-    l2.collision_type = 0x3
-    l3.collision_type = 0x4
+    # Glass friction
+    l1.friction = 0.9
+    l2.friction = 0.9
+    l3.friction = 0.9
+    l1.elasticity = 0.95
+    l2.elasticity = 0.95
+    l3.elasticity = 0.95
 
     space.add(l1, l2, l3, body)
     return l1, l2, l3
@@ -153,7 +161,7 @@ def draw_lines(screen, lines, scale=1.0, color=THECOLORS['dodgerblue4']):
         pv2 = body.position + line.b.rotated(body.angle)
         p1 = to_pygame(pv1, scale)
         p2 = to_pygame(pv2, scale)
-        pygame.draw.lines(screen, partial_color, False, [p1, p2])
+        pygame.draw.lines(screen, partial_color, False, [p1, p2], bottle_thickness*int(scale))
 
 def add_polygon(space, pos, size, collision_type):
     body = pymunk.Body(body_type=pymunk.Body.STATIC)
@@ -317,8 +325,8 @@ def add_level_sensor(screen, scale):
     rect_color = (0, 0, 0)
     rect_x = (level_sensor_x) * scale
     rect_y = (level_sensor_y) * scale
-    rect_width = level_sensor_width * scale
-    rect_height = level_sensor_height * scale
+    rect_width = level_sensor_size * scale
+    rect_height = level_sensor_size * scale
     level_sensor = pygame.Rect(rect_x, rect_y, rect_width, rect_height)
     pygame.draw.rect(screen, rect_color, level_sensor)
 
@@ -454,30 +462,35 @@ def runWorld(autorun):
 
                 pygame.time.set_timer(pygame.event.Event(MODBUS_EVENT), 100, 1)
 
-        # Clear screen and add fix elements
+        # Clear screen and add static elements
         screen.fill(colors["bg"])
         add_nozzle(screen, scale)
         add_level_sensor(screen, scale)
         draw_polygon(screen, nozzle_actuator, scale, color=colors["polygon"])
 
         # Add title and text
-        screen.blit(fontMedium.render("Bottle-filling factory", 1, colors["title"]), (int(10 * scale), int(10 * scale)))
-        title_y = int(10 * scale)
-        virtua_y = title_y + fontMedium.get_height() + int(4 * scale)
-        screen.blit(fontBig.render("VirtuaPlant", 1, colors["text"]), (int(10 * scale), virtua_y))
-        quit_text = fontMedium.render("(press Esc to quit)", True, colors["text"])
-        screen.blit(quit_text, (window_width - quit_text.get_width() - int(10 * scale), int(10 * scale)))
+        if ( show_title ):
+            screen.blit(fontMedium.render("Bottle-filling factory", 1, colors["title"]), (int(10 * scale), int(10 * scale)))
+            title_y = int(10 * scale)
+            virtua_y = title_y + fontMedium.get_height() + int(4 * scale)
+            screen.blit(fontBig.render("VirtuaPlant", 1, colors["text"]), (int(10 * scale), virtua_y))
+            quit_text = fontMedium.render("(press Esc to quit)", True, colors["text"])
+            screen.blit(quit_text, (window_width - quit_text.get_width() - int(10 * scale), int(10 * scale)))
 
         # Handle world inputs
         if nozzle:
             if bottles:
-                balls.append((add_ball(space), bottles[-1][0].body))
+                for i in range(nozzle_throughput):
+                    balls.append((add_ball(space), bottles[-1][0].body))
             else:
                 balls.append((add_ball(space), None))
 
         if motor:
             for bottle in bottles:
                 bottle[0].body.position = (bottle[0].body.position.x + speed, bottle[0].body.position.y)
+            flag = False
+            for ball in balls:
+                ball[0].body.position = (ball[0].body.position.x + speed, ball[0].body.position.y)
 
         if run:
             if not bottles or (bottles[-1][0].body.position.x > 130 + BOTTLE_SPACING):
@@ -494,16 +507,22 @@ def runWorld(autorun):
 
         # Handle balls
         flag_sensor_level=False
+        flag = False
         for ball_data in balls[:]:
             ball, _ = ball_data
 
             # Detect collision with level sensor
-            x,y = to_pygame(ball.body.position, scale)
-            if (( int(y) > level_sensor_y and int(y) < level_sensor_y + level_sensor_height ) and ( int(x) > level_sensor_x and int(x) < level_sensor_x + level_sensor_width )):
-                if ( contact ):
-                    log.info("Sensor level triggered")
-                    plc.setLevelSensor(1)
-                    flag_sensor_level=True
+            x,y = to_pygame(ball.body.position)
+            if ( flag == False ):
+                log.info("X,Y" + str(x) + " " + str(y) )
+                log.info("velocity" + str(ball.body.velocity.y))
+                flag = True
+            if (( int(y) > level_sensor_y and int(y) < level_sensor_y + level_sensor_size ) and ( int(x) > level_sensor_x and int(x) < level_sensor_x + level_sensor_size )):
+                if ( ball.body.velocity.y > -100.0 ):
+                    if ( contact ):
+                        log.info("Sensor level triggered")
+                        plc.setLevelSensor(1)
+                        flag_sensor_level=True
 
             if ball.body.position.y < 0 or ball.body.position.x > WORLD_SCREEN_WIDTH + 1500:
                 space.remove(ball, ball.body)
@@ -534,12 +553,15 @@ def runWorld(autorun):
         space.step(1 / FPS)
         pygame.display.flip()
 
+        if ( debug ): pygame.display.set_caption(f"fps: {clock.get_fps()}")
+
 # Help
 def help():
     print (sys.argv[0], '[-h] [-d] [-D] [-s <integer>] -i <IP> -p <port>')
     print ("    \t-i Modbus server IP")
     print ("    \t-p Modbus server port")
     print ("    \t-s Speed")
+    print ("    \t-t Water throughput")
     print ("    \t-h print this help then exit")
     print ("    \t-d debug")
     print ("    \t-r run at startup")
@@ -550,16 +572,19 @@ def main():
     global dark_mode
     global colors 
     global speed
+    global debug
+    global nozzle_throughput
+    global show_title
 
     # Default values
-    log.setLevel(logging.INFO)
+    log.setLevel(logging.WARNING)
     ip="localhost"
     autorun=0
     port=1502
 
     # Get options
     try:
-        opts, args = getopt.getopt(sys.argv[1:],"hdDirs:p:")
+        opts, args = getopt.getopt(sys.argv[1:],"hdDiSrs:p:t:")
     except getopt.GetoptError as err:
         print(err)  
         help()
@@ -571,13 +596,18 @@ def main():
             sys.exit(0)
         elif opt in ("-i"):
             ip = arg
+        elif opt in ("-t"):
+            nozzle_throughput = int(arg)
         elif opt in ("-s"):
             speed = speed * int(arg)
+        elif opt in ("-S"):
+            show_title = True
         elif opt in ("-p"):
             port = int(arg)
             clearAllSlots = 1
         elif opt in ("-d"):
-            log.setLevel(logging.DEBUG)
+            debug = True
+            log.setLevel(logging.INFO)
         elif opt in ("-r"):
             autorun = 1
         elif opt in ("-D"):
