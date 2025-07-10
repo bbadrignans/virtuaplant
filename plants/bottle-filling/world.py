@@ -23,8 +23,8 @@ debug       = False
 
 # Physic world parameters
 speed               = 0.25
-FPS                 = 60.0
-bottle_thickness    = 5
+FPS                 = 30.0
+bottle_thickness    = 7
 ball_radius         = 3
 
 # Logging
@@ -55,7 +55,7 @@ extra_height_top = 20
 extra_height_bottom = -10  
 
 level_sensor_x = 172
-level_sensor_y = 220
+level_sensor_y = 200
 level_sensor_size = 20
 
 sensor_x = WORLD_SCREEN_WIDTH // 3.58
@@ -122,7 +122,7 @@ def draw_ball(screen, ball, scale=1.0, color=THECOLORS['blue']):
     pygame.draw.circle(screen, color, p, max(1, int(ball.radius * scale)), 0)
 
 def add_bottle(space):
-    mass = 4
+    mass = 5
     inertia = float("inf")
 
     body = pymunk.Body(mass, inertia)
@@ -430,37 +430,36 @@ def runWorld(autorun):
                 point = pygame.mouse.get_pos()
                 log.info(point)
                 log.info("balls:" + str(len(balls)) + "bottles:" + str(len(bottles)))
+                log.info ("level=" + str(level_sensor) + " ,contact=" + str(contact) + ", nozzle=" + str(nozzle) + "motor=" + str(motor) + "run=" + str(run))
 
                 pygame.time.set_timer(pygame.event.Event(RESIZE_EVENT), 1000, 1)
 
-            #Update Modbus registers
-            if event.type == MODBUS_EVENT:
-                run = plc.getRun()
-                motor = plc.getMotor()
-                nozzle = plc.getNozzle()
-                contact = plc.getContact()
-                level_sensor = plc.getLevelSensor()
-                # Manage PLC programm
-                # Motor Logic
-                if (run == 1) and ((contact == 0) or (level_sensor == 1)):
-                    plc.setMotor(1)
-                else:
-                    plc.setMotor(0)
+        #Update Modbus registers
+        #if event.type == MODBUS_EVENT:
+        run = plc.getRun()
+        motor = plc.getMotor()
+        nozzle = plc.getNozzle()
+        contact = plc.getContact()
+        level_sensor = plc.getLevelSensor()
+        # Manage PLC programm
+        # Motor Logic
+        if (run == 1) and ((contact == 0) or (level_sensor == 1)):
+            plc.setMotor(1)
+        else:
+            plc.setMotor(0)
 
-                # Nozzle Logic 
-                if (run == 1) and ((contact == 1) and (level_sensor == 0)):
-                    plc.setNozzle(1)
-                else:
-                    plc.setNozzle(0)
+        # Nozzle Logic 
+        if (run == 1) and ((contact == 1) and (level_sensor == 0)):
+            plc.setNozzle(1)
+        else:
+            plc.setNozzle(0)
 
-                log.info ("level=" + str(level_sensor) + " ,contact=" + str(contact) + ", nozzle=" + str(nozzle) + "motor=" + str(motor) + "run=" + str(run))
+        if is_sensor_touching_bottle(sensor_x, sensor_y, sensor_radius, bottles):
+            plc.setContact(1)
+        else:
+            plc.setContact(0)
 
-                if is_sensor_touching_bottle(sensor_x, sensor_y, sensor_radius, bottles):
-                    plc.setContact(1)
-                else:
-                    plc.setContact(0)
-
-                pygame.time.set_timer(pygame.event.Event(MODBUS_EVENT), 100, 1)
+            #pygame.time.set_timer(pygame.event.Event(MODBUS_EVENT), 100, 1)
 
         # Clear screen and add static elements
         screen.fill(colors["bg"])
@@ -482,15 +481,11 @@ def runWorld(autorun):
             if bottles:
                 for i in range(nozzle_throughput):
                     balls.append((add_ball(space), bottles[-1][0].body))
-            else:
-                balls.append((add_ball(space), None))
 
         if motor:
+            # Move bottle
             for bottle in bottles:
                 bottle[0].body.position = (bottle[0].body.position.x + speed, bottle[0].body.position.y)
-            flag = False
-            for ball in balls:
-                ball[0].body.position = (ball[0].body.position.x + speed, ball[0].body.position.y)
 
         if run:
             if not bottles or (bottles[-1][0].body.position.x > 130 + BOTTLE_SPACING):
@@ -507,24 +502,23 @@ def runWorld(autorun):
 
         # Handle balls
         flag_sensor_level=False
-        flag = False
         for ball_data in balls[:]:
             ball, _ = ball_data
+            # Also move balls to avoid glitches (ball passing through bottle)
+            if motor:
+                ball.body.position = (ball.body.position.x + speed, ball.body.position.y)
 
             # Detect collision with level sensor
             x,y = to_pygame(ball.body.position)
-            if ( flag == False ):
-                log.info("X,Y" + str(x) + " " + str(y) )
-                log.info("velocity" + str(ball.body.velocity.y))
-                flag = True
-            if (( int(y) > level_sensor_y and int(y) < level_sensor_y + level_sensor_size ) and ( int(x) > level_sensor_x and int(x) < level_sensor_x + level_sensor_size )):
-                if ( ball.body.velocity.y > -100.0 ):
-                    if ( contact ):
-                        log.info("Sensor level triggered")
-                        plc.setLevelSensor(1)
-                        flag_sensor_level=True
+            if ( contact ):
+                if ( int(y) > level_sensor_y and int(y) < level_sensor_y + level_sensor_size ):
+                    if ( ( int(x) > level_sensor_x and int(x) < level_sensor_x + level_sensor_size )):
+                        if ( ball.body.velocity.y > -100.0 ):
+                            log.debug("Sensor level triggered" + str(ball.body.velocity.y))
+                            plc.setLevelSensor(1)
+                            flag_sensor_level=True
 
-            if ball.body.position.y < 0 or ball.body.position.x > WORLD_SCREEN_WIDTH + 1500:
+            if ball.body.position.y < 150 or ball.body.position.x > WORLD_SCREEN_WIDTH+150 or ball.body.position.x < -150:
                 space.remove(ball, ball.body)
                 balls.remove(ball_data)
             else:
@@ -538,11 +532,6 @@ def runWorld(autorun):
             pos_x = bottle[0].body.position.x
             screen_pos_x = pos_x * scale
             if screen_pos_x > window_width + 1500 or bottle[0].body.position.y < 150:
-                for ball_data in balls[:]:
-                    ball, ball_bottle = ball_data
-                    if ball_bottle == bottle:
-                        space.remove(ball, ball.body)
-                        balls.remove(ball_data)
                 for segment in bottle:
                     space.remove(segment)
                 space.remove(bottle[0].body)
