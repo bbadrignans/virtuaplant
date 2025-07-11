@@ -56,7 +56,7 @@ extra_height_bottom = -10
 
 level_sensor_x = 172
 level_sensor_y = 200
-level_sensor_size = 20
+level_sensor_size = 10
 
 sensor_x = WORLD_SCREEN_WIDTH // 3.58
 sensor_y = WORLD_SCREEN_HEIGHT // 1.66
@@ -322,13 +322,9 @@ def is_sensor_touching_bottle(sensor_x, sensor_y, sensor_radius, bottles):
     return False
 
 def add_level_sensor(screen, scale):
-    rect_color = (0, 0, 0)
     rect_x = (level_sensor_x) * scale
     rect_y = (level_sensor_y) * scale
-    rect_width = level_sensor_size * scale
-    rect_height = level_sensor_size * scale
-    level_sensor = pygame.Rect(rect_x, rect_y, rect_width, rect_height)
-    pygame.draw.rect(screen, rect_color, level_sensor)
+    pygame.draw.circle(screen, THECOLORS["red"], (rect_x, rect_y) , 5, 0)
 
 def update_wheels(space, wheels, window_width, wheel_y, wheel_radius):
     spacing = 137.5
@@ -464,7 +460,8 @@ def runWorld(autorun):
         # Clear screen and add static elements
         screen.fill(colors["bg"])
         add_nozzle(screen, scale)
-        add_level_sensor(screen, scale)
+        if ( not level_sensor ):
+            add_level_sensor(screen, scale)
         draw_polygon(screen, nozzle_actuator, scale, color=colors["polygon"])
 
         # Add title and text
@@ -510,7 +507,7 @@ def runWorld(autorun):
 
             # Detect collision with level sensor
             x,y = to_pygame(ball.body.position)
-            if ( contact ):
+            if ( contact and not flag_sensor_level):
                 if ( int(y) > level_sensor_y and int(y) < level_sensor_y + level_sensor_size ):
                     if ( ( int(x) > level_sensor_x and int(x) < level_sensor_x + level_sensor_size )):
                         if ( ball.body.velocity.y > -100.0 ):
