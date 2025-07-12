@@ -11,11 +11,13 @@ import logging
 
 MODBUS_PORT = 1502
 
-REG_RUN     = 0x0
-REG_MOTOR   = 0x1
-REG_NOZZLE  = 0x2
-REG_CONTACT = 0x3
-REG_LEVEL   = 0x4
+REG_RUN         = 0x0
+REG_MOTOR       = 0x1
+REG_NOZZLE      = 0x2
+REG_CONTACT     = 0x3
+REG_LEVEL       = 0x4
+REG_THROUGHPUT  = 0x5
+REG_COLOR       = 0x6
 
 logging.basicConfig()
 log = logging.getLogger()
@@ -69,36 +71,12 @@ class ServerModbus:
 
     def start(self):
         StartTcpServer(context=self.context, identity=self.identity, address=(self.address, self.port))
-
-    def setRun(self, value):
-        self.store.setValues(3, REG_RUN, [value])
-
-    def setMotor(self, value):
-        self.store.setValues(3, REG_MOTOR, [value])
-
-    def setNozzle(self, value):
-        self.store.setValues(3, REG_NOZZLE, [value])
-
-    def setContact(self, value):
-        self.store.setValues(3, REG_CONTACT, [value])
-
-    def setLevelSensor(self, value):
-        self.store.setValues(3, REG_LEVEL, [value])
-
-    def getRun(self):
-        return self.store.getValues(3, REG_RUN)[0]
-
-    def getMotor(self):
-        return self.store.getValues(3, REG_MOTOR)[0]
-
-    def getNozzle(self):
-        return self.store.getValues(3, REG_NOZZLE)[0]
-
-    def getContact(self):
-        return self.store.getValues(3, REG_CONTACT)[0]
-
-    def getLevelSensor(self):
-        return self.store.getValues(3, REG_LEVEL)[0]
+    
+    def write(self, addr, data):
+        self.context[0x0].setValues(3, addr, [data])
+    
+    def read(self, addr):
+        return self.context[0x0].getValues(3, addr, count=1)[0]
 
 def main():
     log.setLevel(logging.INFO)
