@@ -19,6 +19,8 @@ REG_LEVEL       = 0x4
 REG_THROUGHPUT  = 0x5
 REG_COLOR       = 0x6
 
+COLORS = ["green", "red", "blue", "orange", "pink"]
+
 logging.basicConfig()
 log = logging.getLogger()
 

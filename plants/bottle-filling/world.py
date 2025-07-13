@@ -17,6 +17,7 @@ from pygame.color import THECOLORS
 
 from modbus import ServerModbus as Server
 from modbus import REG_CONTACT, REG_LEVEL, REG_MOTOR, REG_NOZZLE, REG_RUN, REG_THROUGHPUT, REG_COLOR
+from modbus import COLORS
 
 dark_mode   = False
 show_title  = False
@@ -27,17 +28,10 @@ speed               = 0.25
 FPS                 = 30.0
 bottle_thickness    = 7
 ball_radius         = 3
-
-# Logging
-logging.basicConfig()
-log = logging.getLogger()
-
-# PLC addresses
-WORLD_SCREEN_WIDTH = 550
-WORLD_SCREEN_HEIGHT = 350
-
 NEXT_BOTTLE_DISTANCE = 100
 BOTTLE_SPACING = 80 + bottle_thickness 
+WORLD_SCREEN_WIDTH = 550
+WORLD_SCREEN_HEIGHT = 350
 
 nozzle_center_x = 180
 nozzle_top_y = 450
@@ -63,14 +57,13 @@ wheel_angles = []
 wheel_rotation_speed = 0.05
 conveyor_line_offset = 0.0
 
-COLOR_GREEN         = 0
-COLOR_RED           = 1
+# Logging
+logging.basicConfig()
+log = logging.getLogger()
 
 # Globals
 bottles         = []
 conveyor        = None
-nextColor       = COLOR_GREEN
-currentColor    = COLOR_GREEN  
 
 def get_theme_colors():
     if dark_mode:
@@ -97,8 +90,8 @@ def get_theme_colors():
 def to_pygame(p, scale=1.0):
     return int(p.x * scale), int((-p.y + 600) * scale)
 
-def add_ball(space):
-    mass = 1
+def add_ball(space, color):
+    mass = 0.1 + 0.1 * color
     radius = ball_radius
     inertia = pymunk.moment_for_circle(mass, 0, radius, (0, 0))
     x = random.randint(180, 183)
@@ -107,7 +100,6 @@ def add_ball(space):
     body.position = x, 430
 
     shape = pymunk.Circle(body, radius, (0, 0))
-    shape.collision_type = 0x6  # liquid
     space.add(body, shape)
     return shape
 
@@ -122,9 +114,10 @@ def draw_ball(screen, ball, scale=1.0, color=THECOLORS['blue']):
 
 def add_bottle(space):
     mass = 5
-    inertia = float("inf")
+    inertia = 10
+    #inertia = float("inf")
 
-    body = pymunk.Body(mass, inertia)
+    body = pymunk.Body(mass, inertia, pymunk.Body.KINEMATIC)
     body.position = (130, 300)
 
     l1 = pymunk.Segment(body, (-150, 0), (-100, 0), bottle_thickness)      # bottle_bottom
@@ -381,6 +374,7 @@ def runWorld(autorun):
     running = True
     scale = 1.0
 
+
     #Add pygame events to reduce CPU usage and network trafic
     MODBUS_EVENT = pygame.event.custom_type() 
     RESIZE_EVENT = pygame.event.custom_type() 
@@ -392,6 +386,8 @@ def runWorld(autorun):
     contact = 0
     nozzle = 0
     motor = 0
+    nextColor       = COLORS[0]
+    currentColor    = COLORS[0]  
     run = autorun
 
     plc.write(REG_RUN, autorun)
@@ -427,7 +423,7 @@ def runWorld(autorun):
                 point = pygame.mouse.get_pos()
                 log.info(point)
                 log.info("balls:" + str(len(balls)) + "bottles:" + str(len(bottles)))
-                log.info ("level=" + str(level_sensor) + " ,contact=" + str(contact) + ", nozzle=" + str(nozzle) + "motor=" + str(motor) + "run=" + str(run) + "throughput" + str(nozzle_throughput))
+                log.info ("level=" + str(level_sensor) + " ,contact=" + str(contact) + ", nozzle=" + str(nozzle) + "motor=" + str(motor) + ", run=" + str(run) + ", throughput" + str(nozzle_throughput) + ", currentColor=" + str(currentColor))
 
                 pygame.time.set_timer(pygame.event.Event(RESIZE_EVENT), 1000, 1)
 
@@ -457,8 +453,6 @@ def runWorld(autorun):
         else:
             plc.write(REG_CONTACT, 0)
 
-            #pygame.time.set_timer(pygame.event.Event(MODBUS_EVENT), 100, 1)
-
         # Clear screen and add static elements
         screen.fill(colors["bg"])
         add_nozzle(screen, scale)
@@ -479,14 +473,17 @@ def runWorld(autorun):
         if nozzle:
             if bottles:
                 for i in range(nozzle_throughput):
-                    balls.append((add_ball(space), bottles[-1][0].body, currentColor))
+                    balls.append((add_ball(space, currentColor), bottles[-1][0].body, currentColor))
         else:
             currentColor = nextColor
 
         if motor:
             # Move bottle
             for bottle in bottles:
-                bottle[0].body.position = (bottle[0].body.position.x + speed, bottle[0].body.position.y)
+                bottle[0].body.velocity = (40*speed, 0)
+        else:
+            for bottle in bottles:
+                bottle[0].body.velocity = (0, 0)
 
         if run:
             if not bottles or (bottles[-1][0].body.position.x > 130 + BOTTLE_SPACING):
@@ -506,8 +503,8 @@ def runWorld(autorun):
         for ball_data in balls[:]:
             ball, _ , ballColor = ball_data
             # Also move balls to avoid glitches (ball passing through bottle)
-            if motor:
-                ball.body.position = (ball.body.position.x + speed, ball.body.position.y)
+            #if motor:
+            #    ball.body.position = (ball.body.position.x + speed, ball.body.position.y)
 
             # Detect collision with level sensor
             x,y = to_pygame(ball.body.position)
@@ -523,11 +520,7 @@ def runWorld(autorun):
                 space.remove(ball, ball.body)
                 balls.remove(ball_data)
             else:
-                if ( ballColor == COLOR_GREEN ):
-                    color=colors["ball"]
-                else:
-                    color=THECOLORS["red"]
-                draw_ball(screen, ball, scale, color=color)
+                draw_ball(screen, ball, scale, color=COLORS[ballColor])
 
         if ( flag_sensor_level == False ):
             plc.write(REG_LEVEL, 0)
@@ -544,22 +537,29 @@ def runWorld(autorun):
             else:
                 draw_lines(screen, bottle, scale, color=colors["line"])
 
+        body = pymunk.Body()
+        x = 130 
+        y = 300 
+        body.position = x, y
+        p = to_pygame(body.position, scale)
+        pygame.draw.circle(screen, "red", body.position, 3, 0)
+
         space.step(1 / FPS)
         pygame.display.flip()
 
         if ( debug ): pygame.display.set_caption(f"fps: {clock.get_fps()}")
 
-# Help
-def help():
-    print (sys.argv[0], '[-h] [-d] [-D] [-s <integer>] -i <IP> -p <port>')
-    print ("    \t-i Modbus server IP")
-    print ("    \t-p Modbus server port")
-    print ("    \t-s Speed")
-    print ("    \t-t Water throughput")
-    print ("    \t-h print this help then exit")
-    print ("    \t-d debug")
-    print ("    \t-r run at startup")
-    print ("    \t-D dark mode")
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="The plant")
+    parser.add_argument("-i", "--ip", required=False, help="IP address", default="127.0.0.1")
+    parser.add_argument("-p", "--port", type=int, required=False, help="Port", default=1502)
+    parser.add_argument("-s", "--speed", type=int, required=False, help="Motor speed", default=8)
+    parser.add_argument("-t", "--throughput", type=int, required=False, help="Nozzle throughput", default=2)
+    parser.add_argument("-d", "--debug", action='store_true', help="Debug", default=0)
+    parser.add_argument("-r", "--run", action='store_true', help="Run plant at startup", default=False)
+    parser.add_argument("-D", "--dark", action='store_true', help="Dark mode", default=False)
+    parser.add_argument("-S", "--show_title", action='store_true', help="Show title", default=False)
+    return parser.parse_args()
 
 def main():
     global plc
@@ -570,42 +570,19 @@ def main():
     global nozzle_throughput
     global show_title
 
-    # Default values
+    # Arguments
+    args = parse_arguments()
+    ip = args.ip
+    port = args.port
+    nozzle_throughput = args.throughput
+    speed = speed * args.speed
+    show_title = args.show_title
+    autorun = args.run
+    dark_mode = args.dark
+    debug = args.debug
     log.setLevel(logging.WARNING)
-    ip="localhost"
-    autorun=0
-    port=1502
-
-    # Get options
-    try:
-        opts, args = getopt.getopt(sys.argv[1:],"hdDiSrs:p:t:")
-    except getopt.GetoptError as err:
-        print(err)  
-        help()
-        sys.exit(1)
-
-    for opt, arg in opts:
-        if opt == '-h':
-            help()
-            sys.exit(0)
-        elif opt in ("-i"):
-            ip = arg
-        elif opt in ("-t"):
-            nozzle_throughput = int(arg)
-        elif opt in ("-s"):
-            speed = speed * int(arg)
-        elif opt in ("-S"):
-            show_title = True
-        elif opt in ("-p"):
-            port = int(arg)
-            clearAllSlots = 1
-        elif opt in ("-d"):
-            debug = True
-            log.setLevel(logging.INFO)
-        elif opt in ("-r"):
-            autorun = 1
-        elif opt in ("-D"):
-            dark_mode = True
+    if ( debug ):
+        log.setLevel(logging.INFO)
 
     colors = get_theme_colors()
 

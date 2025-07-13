@@ -2,6 +2,7 @@
 
 import sys
 import tkinter as tk
+from tkinter import ttk
 from modbus import ClientModbus as Client
 from modbus import ConnectionException
 import os
@@ -9,11 +10,12 @@ import time
 import json
 import argparse
 
-from modbus import REG_CONTACT, REG_LEVEL, REG_MOTOR, REG_NOZZLE, REG_RUN
+from modbus import REG_CONTACT, REG_LEVEL, REG_MOTOR, REG_NOZZLE, REG_RUN, REG_THROUGHPUT, REG_COLOR
+from modbus import COLORS
 
 # Constants
-HMI_SCREEN_WIDTH = 20
-HMI_SLEEP = 1
+HMI_SCREEN_WIDTH    = 40
+HMI_SLEEP           = 200 #ms
 
 class HMIWindow:
     def resetLabels(self):
@@ -29,6 +31,9 @@ class HMIWindow:
         self.client = Client(address, port)
         self.client.connect()
 
+        self.throughput = 2
+        self.color = ""
+
         self.window = tk.Tk()
         self.window.title("Bottle-filling factory - HMI - VirtuaPlant")
 
@@ -36,11 +41,11 @@ class HMIWindow:
         self.frame.pack(padx=HMI_SCREEN_WIDTH, pady=HMI_SCREEN_WIDTH)
 
         self.create_widgets()
-        self.window.after(HMI_SLEEP * 1000, self.update_status)
+        self.window.after(HMI_SLEEP, self.update_status)
 
     def create_widgets(self):
-        label = tk.Label(self.frame, text="Bottle-filling process status", font=("Helvetica", 16, "bold"))
-        label.grid(row=0, column=0, columnspan=2)
+        label = tk.Label(self.frame, text="Bottle-filling control HMI", font=("Helvetica", 16, "bold"))
+        label.grid(row=0, column=0, columnspan=3)
 
         self.bottlePositionLabel = tk.Label(self.frame, text="Bottle in position")
         self.bottlePositionValue = tk.Label(self.frame, text="N/A", fg="gray33")
@@ -72,23 +77,51 @@ class HMIWindow:
         self.connectionStatusLabel.grid(row=6, column=0)
         self.connectionStatusValue.grid(row=6, column=1)
 
+        self.throughputLabel = tk.Label(self.frame, text="Throughput")
+        self.throughputSlider = tk.Scale(
+                self.frame, 
+                from_=0, to=4, 
+                orient='horizontal', 
+                )
+        self.throughputSlider.set(2)
+        self.throughputLabel.grid(row=7, column=0)
+        self.throughputSlider.grid(row=7, column=1)
+
+        self.colorLabel = tk.Label(self.frame, text="Color")
+        self.colorComboBoxValue = tk.StringVar()
+        self.colorComboBox = ttk.Combobox(self.frame, textvariable=self.colorComboBoxValue)
+        self.colorComboBox['values'] = COLORS
+        self.colorComboBox['state'] = 'readonly'
+        self.colorComboBox.set(COLORS[0])
+        self.colorLabel.grid(row=8, column=0)
+        self.colorComboBox.grid(row=8, column=1)
+
+        self.spacer1 = tk.Label(self.frame, text="")
+        self.spacer2 = tk.Label(self.frame, text="")
+        self.spacer1.grid(row=9, column=0)
+        self.spacer2.grid(row=10, column=0)
+
         self.runButton = tk.Button(self.frame, text="Run", command=lambda: self.setProcess(1))
         self.stopButton = tk.Button(self.frame, text="Stop", command=lambda: self.setProcess(0))
-        self.runButton.grid(row=7, column=0)
-        self.stopButton.grid(row=7, column=1)
-
-        self.virtuaPlantLabel = tk.Label(self.frame, text="VirtuaPlant - HMI", font=("Helvetica", 8, "italic"))
-        self.virtuaPlantLabel.grid(row=8, column=0, columnspan=2)
+        self.runButton.grid(row=11, column=0)
+        self.stopButton.grid(row=11, column=1)
 
     def setProcess(self, data=None):
         try:
-            print("click")
-            self.client.write(0x0, data)
+            self.client.write(REG_RUN, data)
         except:
             pass
 
     def update_status(self):
         try:
+            if ( self.throughput != self.throughputSlider.get()):
+                self.throughput = self.throughputSlider.get()
+                self.client.write(REG_THROUGHPUT, self.throughput)
+
+            if ( self.color != self.colorComboBox.get()):
+                self.color = self.colorComboBox.get()
+                self.client.write(REG_COLOR, COLORS.index(self.color))
+
             regs = self.client.readln(0, 17)
 
             self.bottlePositionValue.config(
@@ -112,9 +145,16 @@ class HMIWindow:
             )
 
             self.processStatusValue.config(
-                text="RUNNING" if regs[0] == 1 else "STOPPED",
-                fg="green" if regs[0] == 1 else "red"
+                text="RUNNING" if regs[REG_RUN] == 1 else "STOPPED",
+                fg="green" if regs[REG_RUN] == 1 else "red"
             )
+
+            self.throughputLabel.config(
+                    text="Throughput =" + str(regs[REG_THROUGHPUT]),
+                    fg="green" if regs[REG_THROUGHPUT] < 10 else "red")
+            self.throughputSlider.set(regs[REG_THROUGHPUT])
+
+            self.colorComboBox.set(COLORS[regs[REG_COLOR]])
 
             self.connectionStatusValue.config(text="ONLINE", fg="green")
 
@@ -124,12 +164,12 @@ class HMIWindow:
         except:
             raise
         finally:
-            self.window.after(HMI_SLEEP * 1000, self.update_status)
+            self.window.after(HMI_SLEEP, self.update_status)
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="Lancer le HMI pour VirtuaPlant.")
-    parser.add_argument("--ip", required=True, help="Adresse IP du serveur")
-    parser.add_argument("--port", type=int, required=True, help="Port du serveur PLC")
+    parser = argparse.ArgumentParser(description="The HMI")
+    parser.add_argument("-i", "--ip", required=False, help="Adresse IP du serveur", default="127.0.0.1")
+    parser.add_argument("-p", "--port", type=int, required=False, help="Port du serveur PLC", default=1502)
     return parser.parse_args()
 
 def main():
