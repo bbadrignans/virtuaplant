@@ -374,13 +374,10 @@ def runWorld(autorun):
     running = True
     scale = 1.0
 
-
-    #Add pygame events to reduce CPU usage and network trafic
-    MODBUS_EVENT = pygame.event.custom_type() 
+    #Add pygame events to reduce CPU usage 
     RESIZE_EVENT = pygame.event.custom_type() 
-    pygame.event.set_allowed([QUIT, KEYDOWN, K_ESCAPE, MODBUS_EVENT, RESIZE_EVENT])
+    pygame.event.set_allowed([QUIT, KEYDOWN, K_ESCAPE, RESIZE_EVENT])
     pygame.time.set_timer(pygame.event.Event(RESIZE_EVENT), 1, 1)
-    pygame.time.set_timer(pygame.event.Event(MODBUS_EVENT), 2, 1)
 
     level_sensor = 0
     contact = 0
@@ -435,6 +432,7 @@ def runWorld(autorun):
         level_sensor = plc.read(REG_LEVEL)
         nozzle_throughput = plc.read(REG_THROUGHPUT)
         nextColor = plc.read(REG_COLOR)
+
         # Manage PLC programm
         # Motor Logic
         if (run == 1) and ((contact == 0) or (level_sensor == 1)):
@@ -512,11 +510,10 @@ def runWorld(autorun):
                 if ( int(y) > level_sensor_y and int(y) < level_sensor_y + level_sensor_size ):
                     if ( ( int(x) > level_sensor_x and int(x) < level_sensor_x + level_sensor_size )):
                         if ( ball.body.velocity.y > -100.0 ):
-                            log.debug("Sensor level triggered" + str(ball.body.velocity.y))
                             plc.write(REG_LEVEL, 1)
                             flag_sensor_level=True
 
-            if ball.body.position.y < 150 or ball.body.position.x > WORLD_SCREEN_WIDTH+150 or ball.body.position.x < -150:
+            if ( ball.body.position.y < 150 or ball.body.position.x > WORLD_SCREEN_WIDTH+150 or ball.body.position.x < -150):
                 space.remove(ball, ball.body)
                 balls.remove(ball_data)
             else:
@@ -537,12 +534,12 @@ def runWorld(autorun):
             else:
                 draw_lines(screen, bottle, scale, color=colors["line"])
 
-        body = pymunk.Body()
-        x = 130 
-        y = 300 
-        body.position = x, y
-        p = to_pygame(body.position, scale)
-        pygame.draw.circle(screen, "red", body.position, 3, 0)
+#       body = pymunk.Body()
+#       x = 130 
+#       y = 300 
+#       body.position = x, y
+#       p = to_pygame(body.position, scale)
+#       pygame.draw.circle(screen, "red", body.position, 3, 0)
 
         space.step(1 / FPS)
         pygame.display.flip()

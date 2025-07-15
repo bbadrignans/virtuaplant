@@ -14,7 +14,7 @@ from modbus import REG_CONTACT, REG_LEVEL, REG_MOTOR, REG_NOZZLE, REG_RUN, REG_T
 from modbus import COLORS
 
 # Constants
-HMI_SCREEN_WIDTH    = 40
+HMI_SCREEN_WIDTH    = 25
 HMI_SLEEP           = 200 #ms
 
 class HMIWindow:
