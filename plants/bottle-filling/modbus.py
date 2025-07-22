@@ -12,12 +12,13 @@ import logging
 MODBUS_PORT = 1502
 
 REG_RUN         = 0x0
-REG_MOTOR       = 0x1
-REG_NOZZLE      = 0x2
-REG_CONTACT     = 0x3
-REG_LEVEL       = 0x4
-REG_THROUGHPUT  = 0x5
-REG_COLOR       = 0x6
+REG_MOTOR_EN    = 0x1
+REG_MOTOR_SPEED = 0x2
+REG_NOZZLE      = 0x3
+REG_CONTACT     = 0x4
+REG_LEVEL       = 0x5
+REG_THROUGHPUT  = 0x6
+REG_COLOR       = 0x7
 
 COLORS = ["green", "red", "blue", "orange", "pink"]
 

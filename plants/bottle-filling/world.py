@@ -12,24 +12,36 @@ import logging
 import argparse
 import getopt
 import pymunk
+from datetime import datetime, timedelta
 from pygame.locals import *
 from pygame.color import THECOLORS
 
 from modbus import ServerModbus as Server
-from modbus import REG_CONTACT, REG_LEVEL, REG_MOTOR, REG_NOZZLE, REG_RUN, REG_THROUGHPUT, REG_COLOR
+
+from modbus import (
+    REG_RUN,
+    REG_LEVEL,
+    REG_CONTACT,
+    REG_MOTOR_EN,
+    REG_MOTOR_SPEED,
+    REG_NOZZLE,
+    REG_THROUGHPUT,
+    REG_COLOR,
+    MODBUS_PORT,
+)
 from modbus import COLORS
 
 dark_mode   = False
-show_title  = False
+hide_title  = False
 debug       = False
 
 # Physic world parameters
-speed               = 0.25
+speed               = 1.0
 FPS                 = 30.0
 bottle_thickness    = 7
 ball_radius         = 3
 NEXT_BOTTLE_DISTANCE = 100
-BOTTLE_SPACING = 80 + bottle_thickness 
+BOTTLE_SPACING = 120 + bottle_thickness 
 WORLD_SCREEN_WIDTH = 550
 WORLD_SCREEN_HEIGHT = 350
 
@@ -43,7 +55,7 @@ extra_height_top = 20
 extra_height_bottom = -10  
 
 level_sensor_x = 172
-level_sensor_y = 220
+level_sensor_y = 230
 level_sensor_size = 10
 
 sensor_x = WORLD_SCREEN_WIDTH // 3.58
@@ -294,22 +306,15 @@ def run_servers():
     threading.Thread(target=start_server, args=(plc,), daemon=True).start()
 
 def is_sensor_touching_bottle(sensor_x, sensor_y, sensor_radius, bottles):
+
     for bottle in bottles:
         left_segment = bottle[1]  
         body = left_segment.body
-
         world_a = body.position + left_segment.a.rotated(body.angle)
-        world_b = body.position + left_segment.b.rotated(body.angle)
+        ax, _ = to_pygame(world_a)
 
-        ax, ay = to_pygame(world_a)
-        bx, by = to_pygame(world_b)
-
-        if abs(ax - bx) < 2:
-            min_y = min(ay, by)
-            max_y = max(ay, by)
-
-            if abs(sensor_x - ax) <= sensor_radius and min_y <= sensor_y <= max_y:
-                return True
+        if abs(sensor_x - ax) <= sensor_radius:
+            return True
 
     return False
 
@@ -371,8 +376,12 @@ def runWorld(autorun):
     bottles.append(add_bottle(space))
     balls = []
 
+    now = datetime.now()
+    now_previous = datetime.now()
+
     running = True
     scale = 1.0
+    bottle_per_min = 0
 
     #Add pygame events to reduce CPU usage 
     RESIZE_EVENT = pygame.event.custom_type() 
@@ -380,6 +389,7 @@ def runWorld(autorun):
     pygame.time.set_timer(pygame.event.Event(RESIZE_EVENT), 1, 1)
 
     level_sensor = 0
+    flag_sensor_level=False
     contact = 0
     nozzle = 0
     motor = 0
@@ -426,7 +436,8 @@ def runWorld(autorun):
 
         #Update Modbus registers
         run = plc.read(REG_RUN)
-        motor = plc.read(REG_MOTOR)
+        motor = plc.read(REG_MOTOR_EN)
+        speed = plc.read(REG_MOTOR_SPEED)
         nozzle = plc.read(REG_NOZZLE)
         contact = plc.read(REG_CONTACT)
         level_sensor = plc.read(REG_LEVEL)
@@ -436,9 +447,9 @@ def runWorld(autorun):
         # Manage PLC programm
         # Motor Logic
         if (run == 1) and ((contact == 0) or (level_sensor == 1)):
-            plc.write(REG_MOTOR, 1)
+            plc.write(REG_MOTOR_EN, 1)
         else:
-            plc.write(REG_MOTOR, 0)
+            plc.write(REG_MOTOR_EN, 0)
 
         # Nozzle Logic 
         if (run == 1) and ((contact == 1) and (level_sensor == 0)):
@@ -449,6 +460,7 @@ def runWorld(autorun):
         if is_sensor_touching_bottle(sensor_x, sensor_y, sensor_radius, bottles):
             plc.write(REG_CONTACT, 1)
         else:
+            flag_sensor_level=False
             plc.write(REG_CONTACT, 0)
 
         # Clear screen and add static elements
@@ -459,11 +471,11 @@ def runWorld(autorun):
         draw_polygon(screen, nozzle_actuator, scale, color=colors["polygon"])
 
         # Add title and text
-        if ( show_title ):
+        if ( not hide_title ):
             screen.blit(fontMedium.render("Bottle-filling factory", 1, colors["title"]), (int(10 * scale), int(10 * scale)))
             title_y = int(10 * scale)
             virtua_y = title_y + fontMedium.get_height() + int(4 * scale)
-            screen.blit(fontBig.render("VirtuaPlant", 1, colors["text"]), (int(10 * scale), virtua_y))
+            screen.blit(fontBig.render("Bottles per minute = " + str(round(bottle_per_min)) , 1, colors["text"]), (int(10 * scale), virtua_y))
             quit_text = fontMedium.render("(press Esc to quit)", True, colors["text"])
             screen.blit(quit_text, (window_width - quit_text.get_width() - int(10 * scale), int(10 * scale)))
 
@@ -472,13 +484,13 @@ def runWorld(autorun):
             if bottles:
                 for i in range(nozzle_throughput):
                     balls.append((add_ball(space, currentColor), bottles[-1][0].body, currentColor))
-        else:
+        elif run:
             currentColor = nextColor
 
         if motor:
             # Move bottle
             for bottle in bottles:
-                bottle[0].body.velocity = (40*speed, 0)
+                bottle[0].body.velocity = (20*speed, 0)
         else:
             for bottle in bottles:
                 bottle[0].body.velocity = (0, 0)
@@ -497,21 +509,23 @@ def runWorld(autorun):
         add_conveyor(screen, space, window_width, scale, motor)
 
         # Handle balls
-        flag_sensor_level=False
         for ball_data in balls[:]:
             ball, _ , ballColor = ball_data
-            # Also move balls to avoid glitches (ball passing through bottle)
-            #if motor:
-            #    ball.body.position = (ball.body.position.x + speed, ball.body.position.y)
 
             # Detect collision with level sensor
-            x,y = to_pygame(ball.body.position)
             if ( contact and not flag_sensor_level):
+                x,y = to_pygame(ball.body.position)
                 if ( int(y) > level_sensor_y and int(y) < level_sensor_y + level_sensor_size ):
                     if ( ( int(x) > level_sensor_x and int(x) < level_sensor_x + level_sensor_size )):
                         if ( ball.body.velocity.y > -100.0 ):
                             plc.write(REG_LEVEL, 1)
                             flag_sensor_level=True
+                            now = datetime.now()
+                            delta = (now - now_previous).total_seconds()
+                            if ( delta > 2 ):
+                                bottle_per_min = (1*60) / delta 
+                                now_previous = now
+                            break
 
             if ( ball.body.position.y < 150 or ball.body.position.x > WORLD_SCREEN_WIDTH+150 or ball.body.position.x < -150):
                 space.remove(ball, ball.body)
@@ -534,13 +548,6 @@ def runWorld(autorun):
             else:
                 draw_lines(screen, bottle, scale, color=colors["line"])
 
-#       body = pymunk.Body()
-#       x = 130 
-#       y = 300 
-#       body.position = x, y
-#       p = to_pygame(body.position, scale)
-#       pygame.draw.circle(screen, "red", body.position, 3, 0)
-
         space.step(1 / FPS)
         pygame.display.flip()
 
@@ -550,12 +557,12 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="The plant")
     parser.add_argument("-i", "--ip", required=False, help="IP address", default="127.0.0.1")
     parser.add_argument("-p", "--port", type=int, required=False, help="Port", default=1502)
-    parser.add_argument("-s", "--speed", type=int, required=False, help="Motor speed", default=8)
-    parser.add_argument("-t", "--throughput", type=int, required=False, help="Nozzle throughput", default=2)
+    parser.add_argument("-s", "--speed", type=int, required=False, help="Motor speed", default=1)
+    parser.add_argument("-t", "--throughput", type=int, required=False, help="Nozzle throughput", default=1)
     parser.add_argument("-d", "--debug", action='store_true', help="Debug", default=0)
     parser.add_argument("-r", "--run", action='store_true', help="Run plant at startup", default=False)
     parser.add_argument("-D", "--dark", action='store_true', help="Dark mode", default=False)
-    parser.add_argument("-S", "--show_title", action='store_true', help="Show title", default=False)
+    parser.add_argument("-H", "--hide_title", action='store_true', help="Hide title", default=False)
     return parser.parse_args()
 
 def main():
@@ -565,15 +572,15 @@ def main():
     global speed
     global debug
     global nozzle_throughput
-    global show_title
+    global hide_title
 
     # Arguments
     args = parse_arguments()
     ip = args.ip
     port = args.port
     nozzle_throughput = args.throughput
-    speed = speed * args.speed
-    show_title = args.show_title
+    speed = args.speed
+    hide_title = args.hide_title
     autorun = args.run
     dark_mode = args.dark
     debug = args.debug
@@ -588,6 +595,7 @@ def main():
     run_servers()  
     log.info("Modbus server started")
     plc.write(REG_THROUGHPUT, nozzle_throughput)
+    plc.write(REG_MOTOR_SPEED, speed)
 
     # Run World
     runWorld(autorun)    

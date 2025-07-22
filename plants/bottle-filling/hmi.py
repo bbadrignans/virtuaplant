@@ -10,11 +10,21 @@ import time
 import json
 import argparse
 
-from modbus import REG_CONTACT, REG_LEVEL, REG_MOTOR, REG_NOZZLE, REG_RUN, REG_THROUGHPUT, REG_COLOR
+from modbus import (
+    REG_RUN,
+    REG_LEVEL,
+    REG_CONTACT,
+    REG_MOTOR_EN,
+    REG_MOTOR_SPEED,
+    REG_NOZZLE,
+    REG_THROUGHPUT,
+    REG_COLOR,
+    MODBUS_PORT,
+)
 from modbus import COLORS
 
 # Constants
-HMI_SCREEN_WIDTH    = 25
+HMI_SCREEN_WIDTH    = 23
 HMI_SLEEP           = 200 #ms
 
 class HMIWindow:
@@ -31,7 +41,8 @@ class HMIWindow:
         self.client = Client(address, port)
         self.client.connect()
 
-        self.throughput = 2
+        self.throughput = 1
+        self.speed = 1
         self.color = ""
 
         self.window = tk.Tk()
@@ -44,67 +55,104 @@ class HMIWindow:
         self.window.after(HMI_SLEEP, self.update_status)
 
     def create_widgets(self):
-        label = tk.Label(self.frame, text="Bottle-filling control HMI", font=("Helvetica", 16, "bold"))
-        label.grid(row=0, column=0, columnspan=3)
+        row = 0
 
-        self.bottlePositionLabel = tk.Label(self.frame, text="Bottle in position")
-        self.bottlePositionValue = tk.Label(self.frame, text="N/A", fg="gray33")
-        self.bottlePositionLabel.grid(row=1, column=0)
-        self.bottlePositionValue.grid(row=1, column=1)
-
-        self.nozzleStatusLabel = tk.Label(self.frame, text="Nozzle Status")
-        self.nozzleStatusValue = tk.Label(self.frame, text="N/A", fg="gray33")
-        self.nozzleStatusLabel.grid(row=2, column=0)
-        self.nozzleStatusValue.grid(row=2, column=1)
-
-        self.motorStatusLabel = tk.Label(self.frame, text="Motor Status")
-        self.motorStatusValue = tk.Label(self.frame, text="N/A", fg="gray33")
-        self.motorStatusLabel.grid(row=3, column=0)
-        self.motorStatusValue.grid(row=3, column=1)
-
-        self.levelHitLabel = tk.Label(self.frame, text="Level Hit")
-        self.levelHitValue = tk.Label(self.frame, text="N/A", fg="gray33")
-        self.levelHitLabel.grid(row=4, column=0)
-        self.levelHitValue.grid(row=4, column=1)
+        status = tk.Label(self.frame, text="Status", font=("Helvetica", 14, "bold"))
+        status.grid(row=row, column=0, columnspan=3)
+        row +=1
 
         self.processStatusLabel = tk.Label(self.frame, text="Process Status")
         self.processStatusValue = tk.Label(self.frame, text="N/A", fg="gray33")
-        self.processStatusLabel.grid(row=5, column=0)
-        self.processStatusValue.grid(row=5, column=1)
+        self.processStatusLabel.grid(row=row, column=0)
+        self.processStatusValue.grid(row=row, column=1)
+        row +=1
 
-        self.connectionStatusLabel = tk.Label(self.frame, text="Connection Status")
-        self.connectionStatusValue = tk.Label(self.frame, text="OFFLINE", fg="red")
-        self.connectionStatusLabel.grid(row=6, column=0)
-        self.connectionStatusValue.grid(row=6, column=1)
+        self.bottlePositionLabel = tk.Label(self.frame, text="Bottle in position")
+        self.bottlePositionValue = tk.Label(self.frame, text="N/A", fg="gray33")
+        self.bottlePositionLabel.grid(row=row, column=0)
+        self.bottlePositionValue.grid(row=row, column=1)
+        row +=1
 
-        self.throughputLabel = tk.Label(self.frame, text="Throughput")
+        self.levelHitLabel = tk.Label(self.frame, text="Level Hit")
+        self.levelHitValue = tk.Label(self.frame, text="N/A", fg="gray33")
+        self.levelHitLabel.grid(row=row, column=0)
+        self.levelHitValue.grid(row=row, column=1)
+        row +=1
+
+        self.motorStatusLabel = tk.Label(self.frame, text="Motor Status")
+        self.motorStatusValue = tk.Label(self.frame, text="N/A", fg="gray33")
+        self.motorStatusLabel.grid(row=row, column=0)
+        self.motorStatusValue.grid(row=row, column=1)
+        row +=1
+
+        self.nozzleStatusLabel = tk.Label(self.frame, text="Nozzle Status")
+        self.nozzleStatusValue = tk.Label(self.frame, text="N/A", fg="gray33")
+        self.nozzleStatusLabel.grid(row=row, column=0)
+        self.nozzleStatusValue.grid(row=row, column=1)
+        row +=1
+
+        self.spacer2 = tk.Label(self.frame, text="")
+        self.spacer2.grid(row=row, column=0)
+        row +=1
+
+        status = tk.Label(self.frame, text="Settings", font=("Helvetica", 14, "bold"))
+        status.grid(row=row, column=0, columnspan=3)
+        row +=1
+
+        self.throughputLabel = tk.Label(self.frame, text="Nozzle throughput")
         self.throughputSlider = tk.Scale(
                 self.frame, 
+                showvalue=False,
                 from_=0, to=4, 
                 orient='horizontal', 
                 )
-        self.throughputSlider.set(2)
-        self.throughputLabel.grid(row=7, column=0)
-        self.throughputSlider.grid(row=7, column=1)
+        self.throughputSlider.set(1)
+        self.throughputLabel.grid(row=row, column=0)
+        self.throughputSlider.grid(row=row, column=1)
+        row +=1
+
+        self.speedLabel = tk.Label(self.frame, text="Motor speed")
+        self.speedSlider = tk.Scale(
+                self.frame, 
+                showvalue=False,
+                from_=0, to=4, 
+                orient='horizontal', 
+                )
+        self.speedSlider.set(1)
+        self.speedLabel.grid(row=row, column=0)
+        self.speedSlider.grid(row=row, column=1)
+        row +=1
 
         self.colorLabel = tk.Label(self.frame, text="Color")
         self.colorComboBoxValue = tk.StringVar()
         self.colorComboBox = ttk.Combobox(self.frame, textvariable=self.colorComboBoxValue)
+        self.colorComboBox.width = 10
         self.colorComboBox['values'] = COLORS
         self.colorComboBox['state'] = 'readonly'
         self.colorComboBox.set(COLORS[0])
-        self.colorLabel.grid(row=8, column=0)
-        self.colorComboBox.grid(row=8, column=1)
-
-        self.spacer1 = tk.Label(self.frame, text="")
-        self.spacer2 = tk.Label(self.frame, text="")
-        self.spacer1.grid(row=9, column=0)
-        self.spacer2.grid(row=10, column=0)
+        self.colorLabel.grid(row=row, column=0)
+        self.colorComboBox.grid(row=row, column=1)
+        row +=1
 
         self.runButton = tk.Button(self.frame, text="Run", command=lambda: self.setProcess(1))
         self.stopButton = tk.Button(self.frame, text="Stop", command=lambda: self.setProcess(0))
-        self.runButton.grid(row=11, column=0)
-        self.stopButton.grid(row=11, column=1)
+        self.runButton.grid(row=row, column=0)
+        self.stopButton.grid(row=row, column=1)
+        row +=1
+
+        self.spacer3 = tk.Label(self.frame, text="")
+        self.spacer3.grid(row=row, column=0)
+        row +=1
+
+        status = tk.Label(self.frame, text="Connection", font=("Helvetica", 14, "bold"))
+        status.grid(row=row, column=0, columnspan=3)
+        row +=1
+
+        self.connectionStatusLabel = tk.Label(self.frame, text="Status")
+        self.connectionStatusValue = tk.Label(self.frame, text="OFFLINE", fg="red")
+        self.connectionStatusLabel.grid(row=row, column=0)
+        self.connectionStatusValue.grid(row=row, column=1)
+        row +=1
 
     def setProcess(self, data=None):
         try:
@@ -118,6 +166,10 @@ class HMIWindow:
                 self.throughput = self.throughputSlider.get()
                 self.client.write(REG_THROUGHPUT, self.throughput)
 
+            if ( self.speed != self.speedSlider.get()):
+                self.speed = self.speedSlider.get()
+                self.client.write(REG_MOTOR_SPEED, self.speed)
+
             if ( self.color != self.colorComboBox.get()):
                 self.color = self.colorComboBox.get()
                 self.client.write(REG_COLOR, COLORS.index(self.color))
@@ -130,13 +182,13 @@ class HMIWindow:
             )
 
             self.levelHitValue.config(
-                text="YES" if regs[REG_CONTACT] == 1 else "NO",
-                fg="green" if regs[REG_CONTACT] == 1 else "red"
+                text="YES" if regs[REG_LEVEL] == 1 else "NO",
+                fg="green" if regs[REG_LEVEL] == 1 else "red"
             )
 
             self.motorStatusValue.config(
-                text="ON" if regs[REG_MOTOR] == 1 else "OFF",
-                fg="green" if regs[REG_MOTOR] == 1 else "red"
+                text="ON" if regs[REG_MOTOR_EN] == 1 else "OFF",
+                fg="green" if regs[REG_MOTOR_EN] == 1 else "red"
             )
 
             self.nozzleStatusValue.config(
@@ -151,8 +203,13 @@ class HMIWindow:
 
             self.throughputLabel.config(
                     text="Throughput =" + str(regs[REG_THROUGHPUT]),
-                    fg="green" if regs[REG_THROUGHPUT] < 10 else "red")
+                    fg="green" if regs[REG_THROUGHPUT] < 5 else "red")
             self.throughputSlider.set(regs[REG_THROUGHPUT])
+
+            self.speedLabel.config(
+                    text="Motor speed =" + str(regs[REG_MOTOR_SPEED]),
+                    fg="green" if regs[REG_MOTOR_SPEED] < 5 else "red")
+            self.speedSlider.set(regs[REG_MOTOR_SPEED])
 
             self.colorComboBox.set(COLORS[regs[REG_COLOR]])
 
